@@ -2,9 +2,34 @@
 
 Firmware for the **Glustick Link** off-grid messaging device. Built with [PlatformIO](https://platformio.org/) targeting the **Heltec WiFi LoRa 32 V3** (ESP32-S3 + SX1262 + SSD1306 OLED).
 
-Glustick Link lets families communicate when the internet is out. Messages travel over LoRaWAN to a gateway, through ChirpStack, and into the Glustick Family server. When home WiFi is available the device syncs faster over HTTPS and falls back to LoRa automatically.
+Glustick Link lets families communicate when the internet is out. Messages travel over LoRa radio and into the Glustick Family server — which routes them through the same content filter and delivery pipeline as every other message.
 
 **Build status:** builds clean at 1.52 MB flash (45%) and 82 KB RAM (25%).
+
+---
+
+## Which path are you on?
+
+There are two ways to use Glustick Link hardware. **Most people should start with Meshtastic.**
+
+### Path 1 — Meshtastic (recommended, no custom firmware)
+
+Buy two [Heltec WiFi LoRa 32 V3](https://heltec.org/project/wifi-lora-32-v3/) boards. Flash them with [Meshtastic firmware](https://meshtastic.org/docs/getting-started/flashing-firmware/). You do not need this repo at all for this path.
+
+- One board plugs into your server via USB
+- The other goes with your kid
+- Set `MESHTASTIC_PORT=/dev/ttyACM0` in your Glustick Family `.env`
+- Register the kid's board by entering its 8-character node ID (shown on the OLED as `!DEADBEEF`) in the mobile app under Settings → Glustick Link
+
+That's it. The server speaks the Meshtastic serial protocol over USB. No gateway, no ChirpStack, no network infrastructure.
+
+### Path 2 — Custom firmware (this repo) + LoRaWAN
+
+This repo is for the **LoRaWAN infrastructure path**: OTAA join to a LoRaWAN gateway, uplinks routed through ChirpStack to the Glustick Family server via MQTT. This gives you longer range (via proper gateway infrastructure) and WiFi fallback when the device is in range of home WiFi.
+
+You also need:
+- A LoRaWAN gateway (any ChirpStack v4 compatible hardware)
+- ChirpStack v4 + Mosquitto running alongside the Glustick Family server (included in the Docker Compose `lora` profile)
 
 ---
 
@@ -107,16 +132,16 @@ A factory-default AppKey is also derived deterministically from the chip ID (eac
 
 | Characteristic UUID | Value written |
 |---|---|
-| `…000000000001` | DevEUI (16 hex chars) |
-| `…000000000002` | AppEUI (16 hex chars) |
-| `…000000000003` | AppKey (32 hex chars) |
-| `…000000000004` | Glustick server URL |
-| `…000000000005` | Parent PASETO token |
-| `…000000000006` | WiFi SSID (optional) |
-| `…000000000007` | WiFi password (optional) |
-| `…000000000008` | Kid's name (shown on OLED) |
+| `12345678-1234-1234-1234-000000000001` | DevEUI (16 hex chars) |
+| `12345678-1234-1234-1234-000000000002` | AppEUI (16 hex chars) |
+| `12345678-1234-1234-1234-000000000003` | AppKey (32 hex chars) |
+| `12345678-1234-1234-1234-000000000004` | Glustick server URL |
+| `12345678-1234-1234-1234-000000000005` | Parent PASETO token |
+| `12345678-1234-1234-1234-000000000006` | WiFi SSID (optional) |
+| `12345678-1234-1234-1234-000000000007` | WiFi password (optional) |
+| `12345678-1234-1234-1234-000000000008` | Kid's name (shown on OLED) |
 
-5. The app writes `1` to the commit characteristic (`…000000000009`)
+5. The app writes `1` to the commit characteristic (`12345678-1234-1234-1234-000000000009`)
 6. The firmware validates that DevEUI, AppEUI, and AppKey are present and the correct length, then persists all values to NVS (ESP32 non-volatile storage)
 7. BLE advertising stops and the device reboots into normal operation
 
@@ -139,7 +164,9 @@ Byte 5:   chunkTotal total chunk count for this message
 Byte 6+:  payload    up to 44 bytes
 ```
 
-Messages of 44 bytes or fewer fit in a single frame. Longer messages are split into multiple frames; the server reassembles them using Redis with a 2-minute TTL per chunk. The firmware assigns message IDs from a counter stored in NVS so they survive reboots.
+Total maximum payload per frame: 50 bytes (conservative LoRaWAN budget across all data rates).
+
+Messages of 44 bytes or fewer fit in a single frame. Longer messages are split into multiple frames (max 8 chunks = 352 bytes). The server reassembles them using Redis with a 2-minute TTL per chunk. The firmware assigns message IDs from a counter stored in NVS so they survive reboots.
 
 ---
 
@@ -210,5 +237,6 @@ platformio.ini          PlatformIO project config — two envs: heltec_v3, helte
 ## Related
 
 - [Glustick Family server](https://github.com/tkhemraj/glustick-family) — the Go backend these devices talk to
-- [ChirpStack](https://www.chirpstack.io/) — self-hosted LoRaWAN network server used as the cloud transport
+- [Meshtastic](https://meshtastic.org/) — recommended no-firmware-needed alternative transport
+- [ChirpStack](https://www.chirpstack.io/) — self-hosted LoRaWAN network server for the infrastructure path
 - [MCCI LMIC](https://github.com/mcci-catena/arduino-lmic) — LoRaWAN stack for Arduino
