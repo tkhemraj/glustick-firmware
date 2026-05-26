@@ -2,8 +2,6 @@
 #include <Arduino.h>
 #include "config.h"
 
-#define MSG_BODY_MAX 220  // ~5 chunks × 44 bytes, enough for any short message
-
 typedef struct {
     uint16_t id;
     char     body[MSG_BODY_MAX + 1];

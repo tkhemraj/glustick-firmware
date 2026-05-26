@@ -26,7 +26,8 @@ static struct {
 } s_reassemble;
 
 // ── LMIC pin mapping for Heltec WiFi LoRa 32 V3 (SX1262) ────────────────────
-static const lmic_pinmap lmic_pins = {
+// Must be non-static: LMIC hal.h declares 'extern const lmic_pinmap lmic_pins'
+const lmic_pinmap lmic_pins = {
     .nss    = PIN_LMIC_NSS,
     .rxtx   = PIN_LMIC_RXTX,
     .rst    = PIN_LMIC_RST,

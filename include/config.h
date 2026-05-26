@@ -8,6 +8,7 @@
 #define FRAME_HEADER_SIZE 6
 #define LORA_MAX_PAYLOAD  50
 #define CHUNK_MAX_DATA    (LORA_MAX_PAYLOAD - FRAME_HEADER_SIZE)  // 44 bytes
+#define MSG_BODY_MAX      (8 * CHUNK_MAX_DATA)                    // 352 bytes — max 8-chunk message
 
 // ── State machine ─────────────────────────────────────────────────────────────
 typedef enum {
