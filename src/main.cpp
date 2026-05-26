@@ -52,7 +52,7 @@ static void enter_state(DeviceState next) {
     g_state = next;
     switch (next) {
         case STATE_PROVISIONING:
-            display_show_provisioning("GsfLink");
+            // QR display is rendered inside provisioning_run() after derive_defaults
             break;
         case STATE_JOINING:
             lora_init(g_dev_eui, g_app_eui, g_app_key, on_lora_downlink);
@@ -84,6 +84,9 @@ void setup() {
     delay(1500);
 
     queue_init();
+
+    // Derive factory defaults (DevEUI from MAC) before showing the provisioning QR
+    provisioning_derive_defaults();
 
     if (!provisioning_is_complete()) {
         enter_state(STATE_PROVISIONING);

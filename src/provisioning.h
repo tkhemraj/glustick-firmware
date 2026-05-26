@@ -1,6 +1,12 @@
 #pragma once
 #include <Arduino.h>
 
+// Derives DevEUI (EUI-64 from chip MAC), AppEUI (all zeros), and AppKey
+// (deterministic from chip ID) and writes them to NVS as factory defaults.
+// No-op if already set. Call once before provisioning_run() so the QR code
+// on the display is populated even before BLE setup completes.
+void provisioning_derive_defaults();
+
 // BLE provisioning wizard. Call on first boot (NVS_KEY_PROVISIONED not set).
 // Advertises a BLE GATT service; the Glustick mobile app connects and writes
 // the device credentials + server config. Blocks until done or timeout.

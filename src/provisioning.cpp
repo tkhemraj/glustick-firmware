@@ -67,13 +67,65 @@ class CommitCallback : public BLECharacteristicCallbacks {
     }
 };
 
+void provisioning_derive_defaults() {
+    Preferences p;
+    p.begin(NVS_NAMESPACE, true);
+    bool already_set = p.getBool("factory_set", false);
+    p.end();
+    if (already_set) return;
+
+    // EUI-64 from ESP32 chip MAC: insert FF:FE at bytes 3-4, XOR bit 1 of byte 0
+    uint64_t chip_id = ESP.getEfuseMac();
+    uint8_t mac[6];
+    mac[0] = (chip_id      ) & 0xFF;
+    mac[1] = (chip_id >>  8) & 0xFF;
+    mac[2] = (chip_id >> 16) & 0xFF;
+    mac[3] = (chip_id >> 24) & 0xFF;
+    mac[4] = (chip_id >> 32) & 0xFF;
+    mac[5] = (chip_id >> 40) & 0xFF;
+
+    char dev_eui[17];
+    snprintf(dev_eui, sizeof(dev_eui), "%02X%02X%02XFFFE%02X%02X%02X",
+        mac[0] ^ 0x02, mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    // AppKey: deterministic from chip ID (dev/unboxed default; production uses factory-burned keys)
+    uint8_t key[16];
+    for (int i = 0; i < 8; i++) {
+        uint8_t b = (chip_id >> (i * 8)) & 0xFF;
+        key[i]     = b;
+        key[i + 8] = b ^ 0x5A;
+    }
+    char app_key[33];
+    for (int i = 0; i < 16; i++) snprintf(app_key + i * 2, 3, "%02X", key[i]);
+
+    p.begin(NVS_NAMESPACE, false);
+    p.putString(NVS_KEY_DEV_EUI, dev_eui);
+    p.putString(NVS_KEY_APP_EUI, "0000000000000000");
+    p.putString(NVS_KEY_APP_KEY, app_key);
+    p.putBool("factory_set", true);
+    p.end();
+}
+
 bool provisioning_run() {
     // Build BLE device name from last 4 hex chars of chip ID
     uint64_t chip_id = ESP.getEfuseMac();
     char ble_name[24];
     snprintf(ble_name, sizeof(ble_name), "GsfLink-%04X", (uint16_t)(chip_id & 0xFFFF));
 
-    display_show_provisioning(ble_name);
+    // Load factory defaults for QR display (set by provisioning_derive_defaults)
+    char qr_dev_eui[17] = {};
+    char qr_app_eui[17] = {};
+    char qr_app_key[33] = {};
+    {
+        Preferences p;
+        p.begin(NVS_NAMESPACE, true);
+        p.getString(NVS_KEY_DEV_EUI, qr_dev_eui, sizeof(qr_dev_eui));
+        p.getString(NVS_KEY_APP_EUI, qr_app_eui, sizeof(qr_app_eui));
+        p.getString(NVS_KEY_APP_KEY, qr_app_key, sizeof(qr_app_key));
+        p.end();
+    }
+
+    display_show_provisioning_qr(qr_dev_eui, qr_app_eui, qr_app_key, ble_name);
 
     BLEDevice::init(ble_name);
     BLEServer *server = BLEDevice::createServer();

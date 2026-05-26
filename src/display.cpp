@@ -1,6 +1,7 @@
 #include "display.h"
 #include <U8g2lib.h>
 #include <Wire.h>
+#include <qrcode.h>
 
 // Heltec V3: SSD1306 128×64 on I²C with hardware reset pin
 static U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(
@@ -149,4 +150,46 @@ void display_show_error(const char *msg) {
 
 void display_set_lora_rssi(int rssi) {
     s_rssi = rssi;
+}
+
+void display_show_provisioning_qr(const char *dev_eui, const char *app_eui, const char *app_key, const char *ble_name) {
+    // Alphanumeric QR payload: "GSF:{devEUI}:{appEUI}:{appKey}" = 70 chars
+    // Version 3 + ECC_LOW supports 77 alphanumeric chars — fits exactly.
+    char qr_data[72];
+    snprintf(qr_data, sizeof(qr_data), "GSF:%s:%s:%s", dev_eui, app_eui, app_key);
+
+    QRCode qrcode;
+    uint8_t qrcode_buf[qrcode_getBufferSize(3)];
+    qrcode_initText(&qrcode, qrcode_buf, 3, ECC_LOW, qr_data);
+
+    u8g2.clearBuffer();
+
+    // Left 64px: white background
+    u8g2.setDrawColor(1);
+    u8g2.drawBox(0, 0, 64, 64);
+
+    // Draw QR modules (black) centered in the white square
+    // 29 modules × 2px = 58px; 3px margin on each side within 64px
+    u8g2.setDrawColor(0);
+    const int x_off = 3, y_off = 3;
+    for (uint8_t y = 0; y < qrcode.size; y++) {
+        for (uint8_t x = 0; x < qrcode.size; x++) {
+            if (qrcode_getModule(&qrcode, x, y)) {
+                u8g2.drawBox(x_off + x * 2, y_off + y * 2, 2, 2);
+            }
+        }
+    }
+
+    // Right 64px: white text on black background (already black from clearBuffer)
+    u8g2.setDrawColor(1);
+    u8g2.setFont(u8g2_font_4x6_tf);
+    u8g2.drawStr(66, 10, "SCAN TO");
+    u8g2.drawStr(66, 18, "REGISTER");
+    u8g2.drawStr(66, 32, "OR BLE:");
+    // Show last 4 hex chars (after the dash in "GsfLink-A1B2")
+    const char *suffix = strrchr(ble_name, '-');
+    u8g2.setFont(u8g2_font_5x7_tf);
+    u8g2.drawStr(66, 44, suffix ? suffix + 1 : ble_name);
+
+    u8g2.sendBuffer();
 }
