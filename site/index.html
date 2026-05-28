@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Glustick Link — Off-Grid Family Messaging</title>
+  <meta name="description" content="Open-source LoRaWAN + WiFi firmware for the Heltec WiFi LoRa 32 V3. Keeps families in touch when the internet is out.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── Navigation ─────────────────────────────────────────────────────────── -->
+<nav class="nav" id="nav">
+  <div class="nav-inner">
+    <a href="#top" class="nav-logo">
+      <span class="nav-logo-mark">GL</span>
+      <span>Glustick Link</span>
+    </a>
+    <div class="nav-links">
+      <a href="#paths">Get Started</a>
+      <a href="#hardware">Hardware</a>
+      <a href="#build">Build</a>
+      <a href="#provision">Provision</a>
+      <a href="#protocol">Protocol</a>
+      <a href="https://github.com/tkhemraj/glustick-firmware" target="_blank" rel="noopener" class="nav-github">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        GitHub
+      </a>
+    </div>
+    <button class="nav-menu-btn" id="menuBtn" aria-label="Open menu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</nav>
+
+<main>
+
+<!-- ── Hero ───────────────────────────────────────────────────────────────── -->
+<section class="hero" id="top">
+  <div class="hero-bg">
+    <div class="hero-grid"></div>
+    <div class="hero-glow"></div>
+  </div>
+
+  <div class="container hero-inner">
+    <div class="hero-content" data-fade>
+      <div class="badge-row">
+        <span class="badge badge-outline">ESP32-S3 + SX1262</span>
+        <span class="badge badge-green">
+          <span class="dot green"></span>
+          Open source
+        </span>
+      </div>
+
+      <h1 class="hero-title">
+        Messaging that works<br>
+        <span class="hero-accent">when the internet doesn't.</span>
+      </h1>
+
+      <p class="hero-desc">
+        Glustick Link is a compact LoRaWAN + WiFi device that lets families
+        stay in touch during outages. Messages travel miles over LoRa radio
+        and route through your family server automatically — no apps, no
+        internet, no subscriptions.
+      </p>
+
+      <div class="hero-actions">
+        <a href="#paths" class="btn btn-primary">Choose your path →</a>
+        <a href="#build" class="btn btn-ghost">Build the firmware</a>
+      </div>
+
+      <div class="build-status">
+        <span class="dot green"></span>
+        Builds clean &nbsp;·&nbsp; 1.52 MB flash (45%) &nbsp;·&nbsp; 82 KB RAM (25%)
+      </div>
+    </div>
+
+    <!-- OLED device mockup -->
+    <div class="hero-visual" data-fade data-fade-delay="200">
+      <div class="device-wrap">
+        <!-- Radio rings -->
+        <div class="radio-rings">
+          <div class="ring r1"></div>
+          <div class="ring r2"></div>
+          <div class="ring r3"></div>
+        </div>
+
+        <div class="device-board">
+          <div class="device-antenna"></div>
+          <div class="device-oled" id="oled-demo">
+            <!-- State: boot -->
+            <div class="oled-state" id="oled-boot">
+              <div class="oled-boot-text">
+                <div class="oled-brand">Glustick</div>
+                <div class="oled-sub">Link</div>
+                <div class="oled-ver">v1.0.0</div>
+              </div>
+            </div>
+
+            <!-- State: provisioning (QR) -->
+            <div class="oled-state oled-hidden" id="oled-prov">
+              <div class="oled-qr-panel">
+                <svg class="qr-svg" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+                  <!-- Top-left finder -->
+                  <rect x="0" y="0" width="7" height="7" fill="white"/>
+                  <rect x="1" y="1" width="5" height="5" fill="black"/>
+                  <rect x="2" y="2" width="3" height="3" fill="white"/>
+                  <!-- Top-right finder -->
+                  <rect x="14" y="0" width="7" height="7" fill="white"/>
+                  <rect x="15" y="1" width="5" height="5" fill="black"/>
+                  <rect x="16" y="2" width="3" height="3" fill="white"/>
+                  <!-- Bottom-left finder -->
+                  <rect x="0" y="14" width="7" height="7" fill="white"/>
+                  <rect x="1" y="15" width="5" height="5" fill="black"/>
+                  <rect x="2" y="16" width="3" height="3" fill="white"/>
+                  <!-- Timing strips -->
+                  <rect x="8" y="6" width="1" height="1" fill="white"/>
+                  <rect x="10" y="6" width="1" height="1" fill="white"/>
+                  <rect x="12" y="6" width="1" height="1" fill="white"/>
+                  <rect x="6" y="8" width="1" height="1" fill="white"/>
+                  <rect x="6" y="10" width="1" height="1" fill="white"/>
+                  <rect x="6" y="12" width="1" height="1" fill="white"/>
+                  <!-- Data cells (GSF payload pattern) -->
+                  <rect x="8" y="8" width="2" height="2" fill="white"/>
+                  <rect x="11" y="8" width="1" height="1" fill="white"/>
+                  <rect x="13" y="8" width="2" height="2" fill="white"/>
+                  <rect x="8" y="11" width="1" height="2" fill="white"/>
+                  <rect x="10" y="10" width="3" height="1" fill="white"/>
+                  <rect x="14" y="10" width="2" height="1" fill="white"/>
+                  <rect x="8" y="14" width="1" height="2" fill="white"/>
+                  <rect x="10" y="14" width="2" height="1" fill="white"/>
+                  <rect x="13" y="14" width="1" height="2" fill="white"/>
+                  <rect x="15" y="14" width="2" height="1" fill="white"/>
+                  <rect x="9" y="16" width="3" height="1" fill="white"/>
+                  <rect x="16" y="16" width="2" height="1" fill="white"/>
+                  <rect x="8" y="18" width="2" height="1" fill="white"/>
+                  <rect x="11" y="18" width="1" height="1" fill="white"/>
+                  <rect x="13" y="18" width="3" height="1" fill="white"/>
+                </svg>
+              </div>
+              <div class="oled-info-panel">
+                <div class="oled-px">SCAN TO</div>
+                <div class="oled-px">REGISTER</div>
+                <div class="oled-gap"></div>
+                <div class="oled-px">OR BLE:</div>
+                <div class="oled-px oled-code">A1B2</div>
+              </div>
+            </div>
+
+            <!-- State: joining -->
+            <div class="oled-state oled-hidden" id="oled-join">
+              <div class="oled-header-line">CONNECTING</div>
+              <div class="oled-divider-px"></div>
+              <div class="oled-body">
+                <div class="oled-px">Joining</div>
+                <div class="oled-px">LoRaWAN...</div>
+                <div class="oled-px oled-dim">Up to 2 min.</div>
+              </div>
+            </div>
+
+            <!-- State: idle -->
+            <div class="oled-state oled-hidden" id="oled-idle">
+              <div class="oled-header-line">GLUSTICK LINK</div>
+              <div class="oled-divider-px"></div>
+              <div class="oled-body">
+                <div class="oled-idle-row">
+                  <span class="oled-kid">Sophia</span>
+                  <span class="oled-rssi">-82dBm</span>
+                </div>
+                <div class="oled-bat-row">
+                  <span class="oled-bat-bar"><span class="oled-bat-fill" style="width:72%"></span></span>
+                  <span class="oled-bat-pct">72%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="device-pins"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Two paths ──────────────────────────────────────────────────────────── -->
+<section id="paths" class="section">
+  <div class="container">
+    <div class="section-header" data-fade>
+      <h2>Which path are you on?</h2>
+      <p>Two ways to use Glustick Link hardware. Most families should start with Meshtastic.</p>
+    </div>
+
+    <div class="paths-grid" data-fade>
+      <!-- Path 1: Meshtastic -->
+      <div class="path-card path-recommended">
+        <div class="path-top">
+          <span class="path-badge badge-green">Recommended</span>
+          <h3>Path 1 — Meshtastic</h3>
+          <p class="path-sub">No custom firmware needed</p>
+          <p class="path-desc">
+            Flash off-the-shelf Meshtastic firmware. Plug one board into your server,
+            hand the other to your kid. The Glustick Family server speaks Meshtastic's
+            serial protocol natively — no gateway, no ChirpStack, no infrastructure.
+          </p>
+        </div>
+        <div class="path-steps">
+          <div class="step">
+            <span class="step-n">1</span>
+            <span>Buy two Heltec WiFi LoRa 32 V3 boards</span>
+          </div>
+          <div class="step">
+            <span class="step-n">2</span>
+            <span>Flash <a href="https://meshtastic.org/docs/getting-started/flashing-firmware/" target="_blank" rel="noopener">Meshtastic firmware</a> via their web flasher</span>
+          </div>
+          <div class="step">
+            <span class="step-n">3</span>
+            <span>Set <code>MESHTASTIC_PORT=/dev/ttyACM0</code> in your server <code>.env</code></span>
+          </div>
+          <div class="step">
+            <span class="step-n">4</span>
+            <span>Enter the kid's 8-character node ID in the Glustick Family app</span>
+          </div>
+        </div>
+        <div class="path-tags">
+          <span class="tag">No gateway</span>
+          <span class="tag">No ChirpStack</span>
+          <span class="tag">Works immediately</span>
+        </div>
+        <a href="https://meshtastic.org/docs/getting-started/flashing-firmware/" target="_blank" rel="noopener" class="btn btn-primary">Flash Meshtastic →</a>
+      </div>
+
+      <!-- Path 2: Custom firmware -->
+      <div class="path-card path-advanced">
+        <div class="path-top">
+          <span class="path-badge badge-blue">This repo</span>
+          <h3>Path 2 — Custom Firmware</h3>
+          <p class="path-sub">LoRaWAN + WiFi fallback</p>
+          <p class="path-desc">
+            OTAA join to a LoRaWAN gateway. Uplinks route through ChirpStack → MQTT →
+            Glustick Family server. Longer range through proper gateway infrastructure,
+            plus WiFi sync when the device is home.
+          </p>
+        </div>
+        <div class="path-steps">
+          <div class="step">
+            <span class="step-n">1</span>
+            <span>Set up a LoRaWAN gateway + ChirpStack v4</span>
+          </div>
+          <div class="step">
+            <span class="step-n">2</span>
+            <span>Build and flash this firmware with PlatformIO</span>
+          </div>
+          <div class="step">
+            <span class="step-n">3</span>
+            <span>Provision with the Glustick Family app via BLE or QR</span>
+          </div>
+          <div class="step">
+            <span class="step-n">4</span>
+            <span>Enable the <code>lora</code> Docker Compose profile on your server</span>
+          </div>
+        </div>
+        <div class="path-tags">
+          <span class="tag">Longer range</span>
+          <span class="tag">WiFi fallback</span>
+          <span class="tag">Full control</span>
+        </div>
+        <a href="#build" class="btn btn-outline">Build the firmware →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Hardware ───────────────────────────────────────────────────────────── -->
+<section id="hardware" class="section section-alt">
+  <div class="container">
+    <div class="section-header" data-fade>
+      <h2>Hardware</h2>
+      <p>Built on the Heltec WiFi LoRa 32 V3 — a compact board with MCU, radio, display, and power management built in.</p>
+    </div>
+
+    <div class="hardware-layout" data-fade>
+      <div class="hw-specs">
+        <table class="spec-table">
+          <tbody>
+            <tr>
+              <td class="spec-key">MCU</td>
+              <td class="spec-val">ESP32-S3</td>
+            </tr>
+            <tr>
+              <td class="spec-key">Board</td>
+              <td class="spec-val">Heltec WiFi LoRa 32 V3</td>
+            </tr>
+            <tr>
+              <td class="spec-key">Radio</td>
+              <td class="spec-val">SX1262 — LoRa 868 / 915 MHz</td>
+            </tr>
+            <tr>
+              <td class="spec-key">Display</td>
+              <td class="spec-val">SSD1306 128×64 OLED (I²C, reset GPIO 21)</td>
+            </tr>
+            <tr>
+              <td class="spec-key">Wireless</td>
+              <td class="spec-val">WiFi 2.4 GHz + BLE 5.0 + LoRaWAN</td>
+            </tr>
+            <tr>
+              <td class="spec-key">Power</td>
+              <td class="spec-val">USB-C + LiPo header</td>
+            </tr>
+            <tr>
+              <td class="spec-key">Battery ADC</td>
+              <td class="spec-val">GPIO 1 (voltage divider, 3.0–4.2 V)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="hw-pins">
+        <h4 class="hw-pins-title">Pin mapping</h4>
+        <div class="pin-grid">
+          <div class="pin-row">
+            <span class="pin-label">LMIC NSS</span>
+            <span class="pin-num">GPIO 8</span>
+          </div>
+          <div class="pin-row">
+            <span class="pin-label">LMIC RST</span>
+            <span class="pin-num">GPIO 12</span>
+          </div>
+          <div class="pin-row">
+            <span class="pin-label">LMIC DIO1</span>
+            <span class="pin-num">GPIO 14</span>
+          </div>
+          <div class="pin-row">
+            <span class="pin-label">OLED SDA</span>
+            <span class="pin-num">GPIO 17</span>
+          </div>
+          <div class="pin-row">
+            <span class="pin-label">OLED SCL</span>
+            <span class="pin-num">GPIO 18</span>
+          </div>
+          <div class="pin-row">
+            <span class="pin-label">OLED RST</span>
+            <span class="pin-num">GPIO 21</span>
+          </div>
+          <div class="pin-row">
+            <span class="pin-label">VBAT ADC</span>
+            <span class="pin-num">GPIO 1</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Build ──────────────────────────────────────────────────────────────── -->
+<section id="build" class="section">
+  <div class="container">
+    <div class="section-header" data-fade>
+      <h2>Building the firmware</h2>
+      <p>Install <a href="https://platformio.org/" target="_blank" rel="noopener">PlatformIO Core</a> or the VS Code extension, then run one command.</p>
+    </div>
+
+    <div data-fade>
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="us915">US915 — North America</button>
+        <button class="tab-btn" data-tab="eu868">EU868 — Europe</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-us915">
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-lang">bash</span>
+            <button class="copy-btn" data-code="tab-us915-code">Copy</button>
+          </div>
+          <pre id="tab-us915-code"><code><span class="c"># Install dependencies and build</span>
+pio run -e heltec_v3
+
+<span class="c"># Flash to a connected device</span>
+pio run -e heltec_v3 --target upload
+
+<span class="c"># Open the serial monitor (115200 baud)</span>
+pio device monitor</code></pre>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-eu868">
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-lang">bash</span>
+            <button class="copy-btn" data-code="tab-eu868-code">Copy</button>
+          </div>
+          <pre id="tab-eu868-code"><code><span class="c"># EU868 build</span>
+pio run -e heltec_v3_eu868
+
+<span class="c"># Flash to a connected device</span>
+pio run -e heltec_v3_eu868 --target upload
+
+<span class="c"># Open the serial monitor</span>
+pio device monitor</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout callout-info" data-fade>
+      <svg class="callout-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <div>
+        <strong>LMIC patch handled automatically.</strong>
+        The pre-build script <code>scripts/patch_lmic.py</code> configures MCCI LMIC for the SX1262 radio
+        and resolves a symbol conflict with <code>libpp.a</code> before every compile. No manual library edits required.
+      </div>
+    </div>
+
+    <h3 class="subsection-title" data-fade>Dependencies</h3>
+    <div class="deps-grid" data-fade>
+      <div class="dep-card">
+        <div class="dep-name">MCCI LoRaWAN LMIC</div>
+        <div class="dep-ver">^4.1.1</div>
+        <div class="dep-desc">OTAA LoRaWAN join, uplink, downlink</div>
+      </div>
+      <div class="dep-card">
+        <div class="dep-name">ArduinoJson</div>
+        <div class="dep-ver">^7.0.0</div>
+        <div class="dep-desc">WiFi sync JSON parsing</div>
+      </div>
+      <div class="dep-card">
+        <div class="dep-name">U8g2</div>
+        <div class="dep-ver">^2.35.9</div>
+        <div class="dep-desc">SSD1306 OLED display driver</div>
+      </div>
+      <div class="dep-card">
+        <div class="dep-name">QRCode</div>
+        <div class="dep-ver">^0.0.1</div>
+        <div class="dep-desc">QR rendering during provisioning</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Provisioning ────────────────────────────────────────────────────────── -->
+<section id="provision" class="section section-alt">
+  <div class="container">
+    <div class="section-header" data-fade>
+      <h2>First boot — provisioning</h2>
+      <p>On first boot the device derives its identity from the chip eFuse MAC, displays a QR code, and waits up to 5 minutes for the mobile app.</p>
+    </div>
+
+    <div class="provision-layout" data-fade>
+      <div class="provision-visual">
+        <div class="oled-frame">
+          <div class="oled-screen oled-provision-static">
+            <div class="oled-qr-panel">
+              <svg class="qr-svg-lg" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+                <rect width="21" height="21" fill="black"/>
+                <rect x="0" y="0" width="7" height="7" fill="white"/>
+                <rect x="1" y="1" width="5" height="5" fill="black"/>
+                <rect x="2" y="2" width="3" height="3" fill="white"/>
+                <rect x="14" y="0" width="7" height="7" fill="white"/>
+                <rect x="15" y="1" width="5" height="5" fill="black"/>
+                <rect x="16" y="2" width="3" height="3" fill="white"/>
+                <rect x="0" y="14" width="7" height="7" fill="white"/>
+                <rect x="1" y="15" width="5" height="5" fill="black"/>
+                <rect x="2" y="16" width="3" height="3" fill="white"/>
+                <rect x="8" y="6" width="1" height="1" fill="white"/>
+                <rect x="10" y="6" width="1" height="1" fill="white"/>
+                <rect x="12" y="6" width="1" height="1" fill="white"/>
+                <rect x="6" y="8" width="1" height="1" fill="white"/>
+                <rect x="6" y="10" width="1" height="1" fill="white"/>
+                <rect x="6" y="12" width="1" height="1" fill="white"/>
+                <rect x="8" y="8" width="2" height="2" fill="white"/>
+                <rect x="11" y="8" width="1" height="1" fill="white"/>
+                <rect x="13" y="8" width="2" height="2" fill="white"/>
+                <rect x="8" y="11" width="1" height="2" fill="white"/>
+                <rect x="10" y="10" width="3" height="1" fill="white"/>
+                <rect x="14" y="10" width="2" height="1" fill="white"/>
+                <rect x="8" y="14" width="1" height="2" fill="white"/>
+                <rect x="10" y="14" width="2" height="1" fill="white"/>
+                <rect x="13" y="14" width="1" height="2" fill="white"/>
+                <rect x="15" y="14" width="2" height="1" fill="white"/>
+                <rect x="9" y="16" width="3" height="1" fill="white"/>
+                <rect x="16" y="16" width="2" height="1" fill="white"/>
+                <rect x="8" y="18" width="2" height="1" fill="white"/>
+                <rect x="11" y="18" width="1" height="1" fill="white"/>
+                <rect x="13" y="18" width="3" height="1" fill="white"/>
+              </svg>
+            </div>
+            <div class="oled-info-panel">
+              <div class="oled-px">SCAN TO</div>
+              <div class="oled-px">REGISTER</div>
+              <div class="oled-gap"></div>
+              <div class="oled-px">OR BLE:</div>
+              <div class="oled-px oled-code">A1B2</div>
+            </div>
+          </div>
+          <div class="oled-frame-label">Device OLED during provisioning</div>
+        </div>
+      </div>
+
+      <div class="provision-steps">
+        <div class="prov-step">
+          <div class="prov-step-n">1</div>
+          <div class="prov-step-body">
+            <h4>Power on</h4>
+            <p>The device derives a DevEUI from the chip's eFuse MAC using the IEEE EUI-64 rule, generates a deterministic default AppKey, and renders a QR code on the OLED.</p>
+          </div>
+        </div>
+        <div class="prov-step">
+          <div class="prov-step-n">2</div>
+          <div class="prov-step-body">
+            <h4>Scan or connect via BLE</h4>
+            <p>Open the Glustick Family app → Settings → Glustick Link → Add device. Scan the QR to pre-fill credentials, or tap "Set up via Bluetooth" and connect to <code>GsfLink-XXXX</code>.</p>
+          </div>
+        </div>
+        <div class="prov-step">
+          <div class="prov-step-n">3</div>
+          <div class="prov-step-body">
+            <h4>App writes credentials via GATT</h4>
+            <p>Eight characteristics are written in sequence: DevEUI, AppEUI, AppKey, server URL, PASETO token, WiFi SSID, WiFi password, kid's name. Values are staged in RAM until the commit write — an interrupted flow leaves NVS untouched.</p>
+          </div>
+        </div>
+        <div class="prov-step">
+          <div class="prov-step-n">4</div>
+          <div class="prov-step-body">
+            <h4>Device reboots into normal operation</h4>
+            <p>BLE advertising stops. The device joins LoRaWAN (up to 2 minutes) and connects to WiFi if credentials were provided.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- QR format callout -->
+    <div class="qr-format-box" data-fade>
+      <h4>QR code format</h4>
+      <div class="qr-format-code">GSF:<em>devEUI</em>:<em>appEUI</em>:<em>appKey</em></div>
+      <div class="qr-format-example">
+        <span class="label">Example</span>
+        <code>GSF:A8610A34567BFFFE:0000000000000000:A8610A34567BFFFE5A5A5A5A5A5A5A5A</code>
+      </div>
+      <p>Version-3 alphanumeric QR, ECC_LOW. Rendered at 2×2 px per module into the left 64×64 panel with a 3 px margin. Case-insensitive — the app accepts both <code>GSF:</code> and <code>gsf:</code>.</p>
+    </div>
+
+    <!-- GATT table -->
+    <h3 class="subsection-title" data-fade>BLE GATT characteristics</h3>
+    <div class="table-wrap" data-fade>
+      <table class="data-table">
+        <thead>
+          <tr><th>Characteristic UUID</th><th>Written value</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>12345678-…-000000000001</code></td><td>DevEUI — 16 hex chars</td></tr>
+          <tr><td><code>12345678-…-000000000002</code></td><td>AppEUI — 16 hex chars</td></tr>
+          <tr><td><code>12345678-…-000000000003</code></td><td>AppKey — 32 hex chars</td></tr>
+          <tr><td><code>12345678-…-000000000004</code></td><td>Glustick server URL</td></tr>
+          <tr><td><code>12345678-…-000000000005</code></td><td>Parent PASETO token</td></tr>
+          <tr><td><code>12345678-…-000000000006</code></td><td>WiFi SSID (optional)</td></tr>
+          <tr><td><code>12345678-…-000000000007</code></td><td>WiFi password (optional)</td></tr>
+          <tr><td><code>12345678-…-000000000008</code></td><td>Kid's name (shown on OLED)</td></tr>
+          <tr><td><code>12345678-…-000000000009</code></td><td>Commit — write <code>"1"</code> to persist all</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout callout-warn" data-fade>
+      <svg class="callout-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <div>Provisioning times out after <strong>5 minutes</strong> if the app does not connect. Power cycle to retry.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Protocol ────────────────────────────────────────────────────────────── -->
+<section id="protocol" class="section">
+  <div class="container">
+    <div class="section-header" data-fade>
+      <h2>How it works</h2>
+      <p>A simple state machine drives both transports. When WiFi and LoRa are both available, outbound messages go over WiFi. Inbound messages arrive via either path independently.</p>
+    </div>
+
+    <!-- State machine diagram -->
+    <div class="state-machine" data-fade>
+      <!-- CSS grid: PROV→JOIN→LORA on row 1; ↕ under LORA; WIFI↔IDLE on row 3 aligned under LORA/IDLE -->
+      <div class="sm-state sm-prov" style="grid-column:1;grid-row:1">
+        <div class="sm-label">PROVISIONING</div>
+        <div class="sm-desc">BLE · QR on OLED</div>
+      </div>
+      <div class="sm-arr" style="grid-column:2;grid-row:1">→</div>
+      <div class="sm-state sm-join" style="grid-column:3;grid-row:1">
+        <div class="sm-label">JOINING</div>
+        <div class="sm-desc">OTAA join · up to 2 min</div>
+      </div>
+      <div class="sm-arr" style="grid-column:4;grid-row:1">→</div>
+      <div class="sm-state sm-lora" style="grid-column:5;grid-row:1">
+        <div class="sm-label">LORA_CONNECTED</div>
+        <div class="sm-desc">LoRa only · 5 min ping</div>
+      </div>
+      <div class="sm-vert" style="grid-column:5;grid-row:2">↕</div>
+      <div class="sm-state sm-wifi" style="grid-column:5;grid-row:3">
+        <div class="sm-label">WIFI_CONNECTED</div>
+        <div class="sm-desc">HTTPS sync every 30 s</div>
+      </div>
+      <div class="sm-arr sm-arr-bi" style="grid-column:6;grid-row:3">↔</div>
+      <div class="sm-state sm-idle" style="grid-column:7;grid-row:3">
+        <div class="sm-label">IDLE</div>
+        <div class="sm-desc">Display refreshes every 30 s</div>
+      </div>
+    </div>
+
+    <div class="table-wrap" data-fade>
+      <table class="data-table">
+        <thead>
+          <tr><th>State</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="state-chip prov">PROVISIONING</span></td>
+            <td>BLE advertising active. OLED shows QR code and BLE name suffix.</td>
+          </tr>
+          <tr>
+            <td><span class="state-chip join">JOINING</span></td>
+            <td>LMIC OTAA join in progress. Can take up to 2 minutes on first attempt.</td>
+          </tr>
+          <tr>
+            <td><span class="state-chip lora">LORA_CONNECTED</span></td>
+            <td>LoRaWAN joined, no WiFi. Outbound messages sent over LoRa. 5-minute keepalive ping.</td>
+          </tr>
+          <tr>
+            <td><span class="state-chip wifi">WIFI_CONNECTED</span></td>
+            <td>WiFi available. Messages synced over HTTPS every 30 s. LoRaWAN stays active as fallback.</td>
+          </tr>
+          <tr>
+            <td><span class="state-chip idle">IDLE</span></td>
+            <td>Quiet. OLED refreshes every 30 s: kid name, RSSI (dBm), battery %, queued message count.</td>
+          </tr>
+          <tr>
+            <td><span class="state-chip error">ERROR</span></td>
+            <td>Unrecoverable failure. OLED shows error message. Power cycle required.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Frame format -->
+    <h3 class="subsection-title" data-fade>Frame format</h3>
+    <p class="subsection-desc" data-fade>
+      Matches <code>apps/api/internal/lora/chunker.go</code> in the server repo exactly.
+      Both sides encode and decode the same 6-byte header.
+    </p>
+
+    <div class="frame-diagram" data-fade>
+      <div class="frame-byte">
+        <div class="fb-pos">Byte 0</div>
+        <div class="fb-field field-v">
+          <div class="fb-name">version</div>
+          <div class="fb-val">= 1</div>
+        </div>
+      </div>
+      <div class="frame-byte">
+        <div class="fb-pos">Byte 1</div>
+        <div class="fb-field field-t">
+          <div class="fb-name">type</div>
+          <div class="fb-val">0 msg · 1 ack · 2 ping</div>
+        </div>
+      </div>
+      <div class="frame-byte frame-byte-wide">
+        <div class="fb-pos">Bytes 2–3</div>
+        <div class="fb-field field-id">
+          <div class="fb-name">msgID</div>
+          <div class="fb-val">uint16 LE</div>
+        </div>
+      </div>
+      <div class="frame-byte">
+        <div class="fb-pos">Byte 4</div>
+        <div class="fb-field field-ci">
+          <div class="fb-name">chunkIdx</div>
+          <div class="fb-val">0-based</div>
+        </div>
+      </div>
+      <div class="frame-byte">
+        <div class="fb-pos">Byte 5</div>
+        <div class="fb-field field-ct">
+          <div class="fb-name">chunkTotal</div>
+          <div class="fb-val">total count</div>
+        </div>
+      </div>
+      <div class="frame-byte frame-byte-payload">
+        <div class="fb-pos">Bytes 6–49</div>
+        <div class="fb-field field-p">
+          <div class="fb-name">payload</div>
+          <div class="fb-val">up to 44 bytes</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame-stats" data-fade>
+      <div class="frame-stat">
+        <div class="fs-val">50 B</div>
+        <div class="fs-label">max frame size</div>
+      </div>
+      <div class="frame-stat">
+        <div class="fs-val">44 B</div>
+        <div class="fs-label">max payload per chunk</div>
+      </div>
+      <div class="frame-stat">
+        <div class="fs-val">8</div>
+        <div class="fs-label">max chunks per message</div>
+      </div>
+      <div class="frame-stat">
+        <div class="fs-val">352 B</div>
+        <div class="fs-label">max message body</div>
+      </div>
+    </div>
+
+    <!-- WiFi sync -->
+    <h3 class="subsection-title" data-fade>WiFi sync</h3>
+    <div class="wifi-sync-layout" data-fade>
+      <div class="sync-endpoint">
+        <div class="sync-method post">POST</div>
+        <div class="sync-path">/api/v1/lora/uplink</div>
+        <div class="sync-desc">Outbound messages — body JSON, Bearer token auth</div>
+      </div>
+      <div class="sync-endpoint">
+        <div class="sync-method get">GET</div>
+        <div class="sync-path">/api/v1/lora/downlink</div>
+        <div class="sync-desc">Poll for inbound messages — returns JSON array</div>
+      </div>
+    </div>
+    <div class="callout callout-info" data-fade>
+      <svg class="callout-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <div>TLS is used for all WiFi sync. Self-signed certificates are accepted (<code>setInsecure()</code>), which is appropriate for a family-owned server on a home network.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Project structure ───────────────────────────────────────────────────── -->
+<section id="structure" class="section section-alt">
+  <div class="container">
+    <div class="section-header" data-fade>
+      <h2>Project structure</h2>
+    </div>
+
+    <div class="file-tree" data-fade>
+      <div class="ft-dir">src/</div>
+      <div class="ft-file">
+        <span class="ft-name">main.cpp</span>
+        <span class="ft-desc">State machine · Arduino <code>setup()</code> / <code>loop()</code></span>
+      </div>
+      <div class="ft-file">
+        <span class="ft-name">frame.cpp / .h</span>
+        <span class="ft-desc">LoRa frame encode/decode — matches server exactly</span>
+      </div>
+      <div class="ft-file">
+        <span class="ft-name">provisioning.cpp / .h</span>
+        <span class="ft-desc">BLE GATT first-boot wizard + NVS persistence</span>
+      </div>
+      <div class="ft-file">
+        <span class="ft-name">lorawan.cpp / .h</span>
+        <span class="ft-desc">LMIC OTAA join, uplink, downlink, ping</span>
+      </div>
+      <div class="ft-file">
+        <span class="ft-name">wifi_sync.cpp / .h</span>
+        <span class="ft-desc">HTTPS POST/GET sync with the Glustick server</span>
+      </div>
+      <div class="ft-file">
+        <span class="ft-name">display.cpp / .h</span>
+        <span class="ft-desc">OLED UI (U8g2) — all display states + QR rendering</span>
+      </div>
+      <div class="ft-file">
+        <span class="ft-name">message_queue.cpp / .h</span>
+        <span class="ft-desc">NVS-backed outbound message queue (survives reboots)</span>
+      </div>
+      <div class="ft-dir ft-dir-mt">include/</div>
+      <div class="ft-file">
+        <span class="ft-name">config.h</span>
+        <span class="ft-desc">Pin mapping, NVS keys, timeouts, frame constants</span>
+      </div>
+      <div class="ft-dir ft-dir-mt">scripts/</div>
+      <div class="ft-file">
+        <span class="ft-name">patch_lmic.py</span>
+        <span class="ft-desc">Pre-build: patches MCCI LMIC <code>project_config</code> for SX1262</span>
+      </div>
+      <div class="ft-dir ft-dir-mt ft-dir-single">
+        <span class="ft-name">platformio.ini</span>
+        <span class="ft-desc">Two envs: <code>heltec_v3</code> (US915) and <code>heltec_v3_eu868</code></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Related ─────────────────────────────────────────────────────────────── -->
+<section class="section">
+  <div class="container">
+    <div class="section-header" data-fade>
+      <h2>Part of the Glustick ecosystem</h2>
+      <p>Glustick Link firmware is one component of a self-hosted family communications stack.</p>
+    </div>
+
+    <div class="related-grid" data-fade>
+      <a href="https://github.com/tkhemraj/glustick-family" target="_blank" rel="noopener" class="related-card">
+        <div class="related-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </div>
+        <h4>Glustick Family</h4>
+        <p>The Go backend these devices talk to. Handles routing, content filtering, and delivery through a unified pipeline.</p>
+        <span class="related-link">github.com/tkhemraj/glustick-family →</span>
+      </a>
+
+      <a href="https://meshtastic.org/" target="_blank" rel="noopener" class="related-card">
+        <div class="related-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 1a3 3 0 100 6 3 3 0 000-6zM6 8a3 3 0 100 6 3 3 0 000-6zM18 8a3 3 0 100 6 3 3 0 000-6zM6 17a3 3 0 100 6 3 3 0 000-6z"/><path d="M9 4h6M8.7 11H6.3M17.7 11h-2.4M9 19H6.3"/></svg>
+        </div>
+        <h4>Meshtastic</h4>
+        <p>The recommended no-firmware-needed alternative transport. Flash and go — no gateway or infrastructure required.</p>
+        <span class="related-link">meshtastic.org →</span>
+      </a>
+
+      <a href="https://www.chirpstack.io/" target="_blank" rel="noopener" class="related-card">
+        <div class="related-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 010 8.49M7.76 16.24a6 6 0 010-8.49M20.66 3.34a12 12 0 010 16.97M3.34 20.66a12 12 0 010-16.97"/></svg>
+        </div>
+        <h4>ChirpStack</h4>
+        <p>Self-hosted LoRaWAN network server for the infrastructure path. Included in the Glustick Docker Compose <code>lora</code> profile.</p>
+        <span class="related-link">chirpstack.io →</span>
+      </a>
+
+      <a href="https://github.com/mcci-catena/arduino-lmic" target="_blank" rel="noopener" class="related-card">
+        <div class="related-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8l3 3-3 3M13 11h4"/></svg>
+        </div>
+        <h4>MCCI LMIC</h4>
+        <p>LoRaWAN stack for Arduino. Handles OTAA join, Class A uplink/downlink, and the SX1262 radio HAL.</p>
+        <span class="related-link">github.com/mcci-catena/arduino-lmic →</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ── Footer ─────────────────────────────────────────────────────────────── -->
+<footer class="footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <span class="nav-logo-mark sm">GL</span>
+      <div>
+        <div class="footer-name">Glustick Link</div>
+        <div class="footer-tagline">Open-source firmware for off-grid family messaging</div>
+      </div>
+    </div>
+    <div class="footer-links">
+      <a href="https://github.com/tkhemraj/glustick-firmware" target="_blank" rel="noopener">Firmware (this repo)</a>
+      <a href="https://github.com/tkhemraj/glustick-family" target="_blank" rel="noopener">Glustick Family</a>
+      <a href="https://meshtastic.org/" target="_blank" rel="noopener">Meshtastic</a>
+      <a href="https://heltec.org/project/wifi-lora-32-v3/" target="_blank" rel="noopener">Heltec V3</a>
+    </div>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>

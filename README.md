@@ -1,35 +1,68 @@
+<div align="center">
+
 # Glustick Link — Firmware
 
-Firmware for the **Glustick Link** off-grid messaging device. Built with [PlatformIO](https://platformio.org/) targeting the **Heltec WiFi LoRa 32 V3** (ESP32-S3 + SX1262 + SSD1306 OLED).
+**Messaging that works when the internet doesn't.**<br>
+LoRaWAN + WiFi firmware for the [Heltec WiFi LoRa 32 V3](https://heltec.org/project/wifi-lora-32-v3/) · ESP32-S3 + SX1262 + SSD1306 OLED
 
-Glustick Link lets families communicate when the internet is out. Messages travel over LoRa radio and into the Glustick Family server — which routes them through the same content filter and delivery pipeline as every other message.
+<br>
 
-**Build status:** builds clean at 1.52 MB flash (45%) and 82 KB RAM (25%).
+[![Build](https://img.shields.io/badge/build-passing-4ade80?style=flat-square&logo=platformio&logoColor=white)](#building)&nbsp;
+[![Flash](https://img.shields.io/badge/flash-1.52%20MB%20%2845%25%29-4f90f0?style=flat-square)](#building)&nbsp;
+[![RAM](https://img.shields.io/badge/RAM-82%20KB%20%2825%25%29-4f90f0?style=flat-square)](#building)&nbsp;
+[![PlatformIO](https://img.shields.io/badge/PlatformIO-ESP32--S3-f5822a?style=flat-square&logo=platformio&logoColor=white)](https://platformio.org)&nbsp;
+[![LoRaWAN](https://img.shields.io/badge/LoRaWAN-OTAA-7c3aed?style=flat-square)](#how-it-works)
+
+<br>
+
+*Part of the [Glustick Family](https://github.com/tkhemraj/glustick-family) self-hosted communications stack.*
+
+</div>
 
 ---
 
 ## Which path are you on?
 
-There are two ways to use Glustick Link hardware. **Most people should start with Meshtastic.**
+Two ways to use Glustick Link hardware. **Most families should start with Meshtastic.**
 
-### Path 1 — Meshtastic (recommended, no custom firmware)
+<table>
+<tr>
+<td valign="top" width="50%">
 
-Buy two [Heltec WiFi LoRa 32 V3](https://heltec.org/project/wifi-lora-32-v3/) boards. Flash them with [Meshtastic firmware](https://meshtastic.org/docs/getting-started/flashing-firmware/). You do not need this repo at all for this path.
+### ✅ Path 1 — Meshtastic
+**Recommended · No custom firmware needed**
 
-- One board plugs into your server via USB
-- The other goes with your kid
-- Set `MESHTASTIC_PORT=/dev/ttyACM0` in your Glustick Family `.env`
-- Register the kid's board by entering its 8-character node ID (shown on the OLED as `!DEADBEEF`) in the mobile app under Settings → Glustick Link
+Buy two Heltec boards, flash Meshtastic, done. The Glustick Family server speaks the Meshtastic serial protocol natively — no gateway, no ChirpStack, no infrastructure.
 
-That's it. The server speaks the Meshtastic serial protocol over USB. No gateway, no ChirpStack, no network infrastructure.
+**Steps**
 
-### Path 2 — Custom firmware (this repo) + LoRaWAN
+1. Buy two [Heltec WiFi LoRa 32 V3](https://heltec.org/project/wifi-lora-32-v3/) boards
+2. Flash [Meshtastic firmware](https://meshtastic.org/docs/getting-started/flashing-firmware/) via their web flasher
+3. Set `MESHTASTIC_PORT=/dev/ttyACM0` in your Glustick Family `.env`
+4. Register the kid's board by entering its 8-character node ID (shown on OLED as `!DEADBEEF`) in the app
 
-This repo is for the **LoRaWAN infrastructure path**: OTAA join to a LoRaWAN gateway, uplinks routed through ChirpStack to the Glustick Family server via MQTT. This gives you longer range (via proper gateway infrastructure) and WiFi fallback when the device is in range of home WiFi.
+**No gateway &nbsp;·&nbsp; No ChirpStack &nbsp;·&nbsp; Works immediately**
 
-You also need:
-- A LoRaWAN gateway (any ChirpStack v4 compatible hardware)
-- ChirpStack v4 + Mosquitto running alongside the Glustick Family server (included in the Docker Compose `lora` profile)
+</td>
+<td valign="top" width="50%">
+
+### 🛠 Path 2 — Custom Firmware
+**This repo · LoRaWAN + WiFi fallback**
+
+OTAA join to a LoRaWAN gateway. Uplinks route through ChirpStack → MQTT → Glustick Family server. Longer range via proper gateway infrastructure, plus WiFi sync when the device is home.
+
+**Steps**
+
+1. Set up a LoRaWAN gateway + ChirpStack v4
+2. Build and flash this firmware with PlatformIO
+3. Provision with the Glustick Family app via QR code or BLE
+4. Enable the `lora` Docker Compose profile on your server
+
+**Longer range &nbsp;·&nbsp; WiFi fallback &nbsp;·&nbsp; Full control**
+
+</td>
+</tr>
+</table>
 
 ---
 
@@ -37,11 +70,27 @@ You also need:
 
 | Component | Details |
 |---|---|
-| MCU | ESP32-S3 (Heltec WiFi LoRa 32 V3 — `heltec_wifi_lora_32_V3`) |
-| Radio | SX1262 (LoRa 868/915 MHz) |
-| Display | SSD1306 128×64 OLED (I²C, hardware reset on GPIO 21) |
+| MCU | ESP32-S3 (`heltec_wifi_lora_32_V3`) |
+| Radio | SX1262 — LoRa 868 / 915 MHz |
+| Display | SSD1306 128×64 OLED (I²C, hardware reset GPIO 21) |
 | Connectivity | WiFi 2.4 GHz + BLE 5.0 + LoRaWAN |
-| Power | USB-C + LiPo header; battery percentage read from GPIO 1 ADC |
+| Power | USB-C + LiPo header |
+| Battery ADC | GPIO 1 (voltage divider, 3.0–4.2 V → 0–100%) |
+
+<details>
+<summary><strong>Pin mapping</strong></summary>
+
+| Signal | GPIO |
+|---|---|
+| LMIC NSS (SPI CS) | 8 |
+| LMIC RST | 12 |
+| LMIC DIO1 | 14 |
+| OLED SDA | 17 |
+| OLED SCL | 18 |
+| OLED RST | 21 |
+| VBAT ADC | 1 |
+
+</details>
 
 ---
 
@@ -49,61 +98,68 @@ You also need:
 
 Install [PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/index.html) or the [VS Code extension](https://platformio.org/install/ide?install=vscode).
 
-```bash
-# Install dependencies and build (US915 — North America, default)
-pio run -e heltec_v3
+**US915 — North America (default)**
 
-# EU868 (Europe)
-pio run -e heltec_v3_eu868
+```bash
+# Install dependencies and build
+pio run -e heltec_v3
 
 # Flash to a connected device
 pio run -e heltec_v3 --target upload
 
-# Open the serial monitor (115200 baud)
+# Serial monitor (115200 baud)
 pio device monitor
 ```
 
-### LMIC patch script
+**EU868 — Europe**
 
-MCCI LMIC's bundled `project_config/lmic_project_config.h` defaults to SX1276. The pre-build script `scripts/patch_lmic.py` overwrites that file with:
-
-```c
-#define CFG_sx1262_radio 1
-#define LMIC_USE_INTERRUPTS
+```bash
+pio run -e heltec_v3_eu868
+pio run -e heltec_v3_eu868 --target upload
 ```
 
-This runs automatically before every compile — you do not need to edit anything manually. The script is idempotent: it only writes if the content has changed, so incremental builds are not affected.
+> [!NOTE]
+> The pre-build script `scripts/patch_lmic.py` automatically configures MCCI LMIC for the SX1262 radio before every compile. It also resolves a symbol conflict between LMIC's `hal_init` and ESP32's `libpp.a` via `-Wl,--allow-multiple-definition`. No manual library edits required.
 
-The build also passes `-Wl,--allow-multiple-definition` to resolve a symbol conflict between LMIC's `hal_init` and ESP32's `libpp.a`. LMIC's version is linked first and is the one used for SX1262 SPI initialisation.
-
-### Dependencies (managed by PlatformIO)
+### Dependencies
 
 | Library | Version | Purpose |
 |---|---|---|
-| `mcci-catena/MCCI LoRaWAN LMIC library` | ^4.1.1 | OTAA LoRaWAN join + uplink/downlink |
-| `bblanchon/ArduinoJson` | ^7.0.0 | WiFi sync JSON parsing |
-| `olikraus/U8g2` | ^2.35.9 | OLED display driver |
-| `ricmoo/QRCode` | ^0.0.1 | QR code rendering during provisioning |
+| `mcci-catena/MCCI LoRaWAN LMIC library` | `^4.1.1` | OTAA LoRaWAN join + uplink/downlink |
+| `bblanchon/ArduinoJson` | `^7.0.0` | WiFi sync JSON parsing |
+| `olikraus/U8g2` | `^2.35.9` | SSD1306 OLED display driver |
+| `ricmoo/QRCode` | `^0.0.1` | QR code rendering during provisioning |
 
 ---
 
 ## First boot — provisioning
 
-On first boot the device derives its identity from the chip MAC address, displays a QR code and BLE name on the OLED, and waits up to **5 minutes** for the mobile app to connect.
-
-### What the OLED shows
-
-The left half of the 128×64 display shows a QR code. The right half shows:
+On first boot the device derives its identity from the chip eFuse MAC, displays a QR code on the OLED, and waits up to **5 minutes** for the Glustick Family mobile app.
 
 ```
-SCAN TO
-REGISTER
-
-OR BLE:
-A1B2
+┌──────────────────────────────────────┐
+│ ▓▓▓▓▓▓▓▓▓▓▓▓   SCAN TO              │
+│ ▓         ▓▓   REGISTER             │
+│ ▓  ██████ ▓▓                        │
+│ ▓  ██████ ▓▓   OR BLE:              │
+│ ▓         ▓▓   A1B2                 │
+│ ▓▓▓▓▓▓▓▓▓▓▓▓                        │
+└──────────────────────────────────────┘
+  Device OLED during provisioning
 ```
 
-The four hex characters are the last 4 of the chip ID — they also appear in the BLE device name (`GsfLink-A1B2`). Scan the QR code with the Glustick Family app to pre-fill registration, or tap "Add device" and connect via Bluetooth.
+**Provisioning flow**
+
+1. **Power on.** The device derives a DevEUI from the chip eFuse MAC using the IEEE EUI-64 rule and generates a deterministic default AppKey. The QR code and BLE name appear on the OLED.
+
+2. **Scan or connect via BLE.** Open the Glustick Family app → <kbd>Settings</kbd> → <kbd>Glustick Link</kbd> → <kbd>Add device</kbd>. Scan the QR to pre-fill credentials, or tap <kbd>Set up via Bluetooth</kbd> and connect to `GsfLink-XXXX`.
+
+3. **App writes credentials via GATT.** Eight characteristics are written in sequence (see table below). Values are staged in RAM until commit — an interrupted write leaves NVS untouched.
+
+4. **Device reboots.** BLE advertising stops. The device joins LoRaWAN (up to 2 minutes) and connects to WiFi if credentials were provided.
+
+> [!WARNING]
+> Provisioning times out after **5 minutes** if the app does not connect. Power cycle to retry.
 
 ### QR code format
 
@@ -113,104 +169,99 @@ GSF:{devEUI}:{appEUI}:{appKey}
 
 Example: `GSF:A8610A34567BFFFE:0000000000000000:A8610A34567BFFFE5A5A5A5A5A5A5A5A`
 
-The app accepts both `gsf:` and `GSF:` (case-insensitive). Scanning fills the DevEUI, AppEUI, and AppKey fields automatically.
-
-The QR is a version-3 alphanumeric code with ECC_LOW, rendered at 2×2 pixels per module into the 64×64 left panel (3 px margin on each side).
+Version-3 alphanumeric QR, ECC\_LOW. Rendered at 2×2 px per module into the left 64×64 panel (3 px margin). Case-insensitive — the app accepts both `GSF:` and `gsf:`.
 
 ### DevEUI derivation
 
-`provisioning_derive_defaults()` runs before BLE advertising begins. It derives the DevEUI from the chip's 48-bit eFuse MAC using the IEEE EUI-64 rule: `{mac[0]^0x02}:{mac[1]}:{mac[2]}:FF:FE:{mac[3]}:{mac[4]}:{mac[5]}`. The result is deterministic and unique per chip.
+`provisioning_derive_defaults()` derives the DevEUI from the chip's 48-bit eFuse MAC using the IEEE EUI-64 rule: `{mac[0]^0x02}:{mac[1]}:{mac[2]}:FF:FE:{mac[3]}:{mac[4]}:{mac[5]}`. The result is deterministic and unique per chip.
 
-A factory-default AppKey is also derived deterministically from the chip ID (each byte XOR'd with `0x5A`). This is a convenience default for development — production units should use factory-burned keys registered in ChirpStack.
+### BLE GATT characteristics
 
-### BLE provisioning flow
+The app negotiates a 512-byte MTU, then writes these 9 characteristics in sequence:
 
-1. Open the Glustick Family mobile app
-2. Go to Settings → Glustick Link → Add device → Set up via Bluetooth
-3. The app scans for BLE devices named `GsfLink-XXXX`
-4. On connect the app negotiates a 512-byte MTU and writes 8 GATT characteristics in sequence:
-
-| Characteristic UUID | Value written |
+| UUID (suffix) | Value written |
 |---|---|
-| `12345678-1234-1234-1234-000000000001` | DevEUI (16 hex chars) |
-| `12345678-1234-1234-1234-000000000002` | AppEUI (16 hex chars) |
-| `12345678-1234-1234-1234-000000000003` | AppKey (32 hex chars) |
-| `12345678-1234-1234-1234-000000000004` | Glustick server URL |
-| `12345678-1234-1234-1234-000000000005` | Parent PASETO token |
-| `12345678-1234-1234-1234-000000000006` | WiFi SSID (optional) |
-| `12345678-1234-1234-1234-000000000007` | WiFi password (optional) |
-| `12345678-1234-1234-1234-000000000008` | Kid's name (shown on OLED) |
+| `…-000000000001` | DevEUI — 16 hex chars |
+| `…-000000000002` | AppEUI — 16 hex chars |
+| `…-000000000003` | AppKey — 32 hex chars |
+| `…-000000000004` | Glustick server URL |
+| `…-000000000005` | Parent PASETO token |
+| `…-000000000006` | WiFi SSID (optional) |
+| `…-000000000007` | WiFi password (optional) |
+| `…-000000000008` | Kid's name (shown on OLED) |
+| `…-000000000009` | Commit — write `"1"` to persist all |
 
-5. The app writes `1` to the commit characteristic (`12345678-1234-1234-1234-000000000009`)
-6. The firmware validates that DevEUI, AppEUI, and AppKey are present and the correct length, then persists all values to NVS (ESP32 non-volatile storage)
-7. BLE advertising stops and the device reboots into normal operation
-
-Provisioning times out after 5 minutes if the app does not connect. Power cycle to retry.
-
-Values are staged in RAM until commit; an incomplete write (app disconnects mid-flow) does not corrupt NVS.
+Full UUID prefix: `12345678-1234-1234-1234-`
 
 ---
 
-## Frame format
+## How it works
 
-Matches `apps/api/internal/lora/chunker.go` in the server repo exactly. Both sides encode and decode the same structure.
-
-```
-Byte 0:   version    = 1
-Byte 1:   type       = 0 (message) | 1 (ack) | 2 (ping)
-Byte 2-3: msgID      uint16 little-endian
-Byte 4:   chunkIdx   0-based
-Byte 5:   chunkTotal total chunk count for this message
-Byte 6+:  payload    up to 44 bytes
-```
-
-Total maximum payload per frame: 50 bytes (conservative LoRaWAN budget across all data rates).
-
-Messages of 44 bytes or fewer fit in a single frame. Longer messages are split into multiple frames (max 8 chunks = 352 bytes). The server reassembles them using Redis with a 2-minute TTL per chunk. The firmware assigns message IDs from a counter stored in NVS so they survive reboots.
-
----
-
-## State machine
+### State machine
 
 ```
-PROVISIONING  ──→  JOINING  ──→  LORA_CONNECTED
-                                       ↕
-                             WIFI_CONNECTED  ←──→  IDLE
+PROVISIONING ──→ JOINING ──→ LORA_CONNECTED
+                                    ↕
+                          WIFI_CONNECTED ↔ IDLE
 ```
 
 | State | Description |
 |---|---|
-| `PROVISIONING` | BLE advertising; OLED shows QR code and BLE name |
-| `JOINING` | LMIC OTAA join in progress; can take up to 2 minutes |
-| `LORA_CONNECTED` | Joined, no WiFi; outbound messages sent over LoRa; LoRa ping every 5 min |
-| `WIFI_CONNECTED` | WiFi available; messages synced over HTTPS every 30 s; LoRaWAN still active as fallback |
-| `IDLE` | Quiet; OLED refreshes every 30 s showing kid name, RSSI, battery %, queued message count |
-| `ERROR` | Unrecoverable failure; OLED shows error text; power cycle required |
+| `PROVISIONING` | BLE advertising active. OLED shows QR code and BLE name suffix. |
+| `JOINING` | LMIC OTAA join in progress. Can take up to 2 minutes. |
+| `LORA_CONNECTED` | LoRaWAN joined, no WiFi. Outbound messages sent over LoRa. 5-minute keepalive ping. |
+| `WIFI_CONNECTED` | WiFi available. Messages synced over HTTPS every 30 s. LoRaWAN stays active as fallback. |
+| `IDLE` | Quiet. OLED refreshes every 30 s: kid name, RSSI (dBm), battery %, queued message count. |
+| `ERROR` | Unrecoverable failure. OLED shows error message. Power cycle required. |
 
-When both WiFi and LoRa are available, outbound messages go over WiFi (faster, lower power). LoRa is used when WiFi is absent. Inbound messages arrive via both transports independently.
+> When both WiFi and LoRa are available, outbound messages go over WiFi (faster, lower power). LoRa is used when WiFi is absent. Inbound messages arrive via both transports independently.
 
----
+### Frame format
 
-## WiFi sync
+Matches `apps/api/internal/lora/chunker.go` in the server repo exactly. Both sides encode and decode the same structure.
 
-The device posts outbound messages to `{serverUrl}/api/v1/lora/uplink` and polls `{serverUrl}/api/v1/lora/downlink` every 30 seconds. Both requests carry the parent PASETO token in an `Authorization: Bearer` header. TLS is used; self-signed certificates are accepted (`setInsecure()`), which is appropriate for a family-owned server.
+```
+┌─────────┬─────────┬───────────────┬───────────┬─────────────┬──────────────────┐
+│ Byte 0  │ Byte 1  │   Bytes 2–3   │  Byte 4   │   Byte 5    │   Bytes 6–49     │
+├─────────┼─────────┼───────────────┼───────────┼─────────────┼──────────────────┤
+│ version │  type   │     msgID     │ chunkIdx  │ chunkTotal  │    payload       │
+│  = 1    │0·1·2    │  uint16 LE    │  0-based  │ total count │  up to 44 bytes  │
+└─────────┴─────────┴───────────────┴───────────┴─────────────┴──────────────────┘
+ type: 0 = message · 1 = ack · 2 = ping
+```
 
-Messages that fail to send over WiFi are left in the NVS queue and retried on the next sync cycle or sent over LoRa if WiFi drops.
-
----
-
-## OLED display states
-
-| State | What's shown |
+| Constant | Value |
 |---|---|
-| Boot | "Glustick Link" + firmware version |
-| Provisioning | QR code (left) + BLE name suffix (right) |
-| Joining | "Joining LoRaWAN… This can take up to 2 minutes." |
+| Max frame size | 50 bytes |
+| Max payload per chunk | 44 bytes |
+| Max chunks per message | 8 |
+| Max message body | 352 bytes |
+
+Messages of 44 bytes or fewer fit in a single frame. Longer messages are split into up to 8 chunks. The server reassembles them using Redis with a 2-minute TTL per chunk. Message IDs are stored in NVS and survive reboots.
+
+### WiFi sync
+
+The device POSTs outbound messages and polls for inbound messages every **30 seconds**:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/lora/uplink` | Send outbound message — body JSON, `Authorization: Bearer` header |
+| `GET` | `/api/v1/lora/downlink` | Poll for inbound messages — returns JSON array |
+
+TLS is used for all requests. Self-signed certificates are accepted (`setInsecure()`), appropriate for a family-owned server. Messages that fail to send over WiFi are left in the NVS queue and retried on the next cycle, or sent over LoRa if WiFi drops.
+
+### OLED display states
+
+| State | Display |
+|---|---|
+| Boot | `Glustick Link` + firmware version |
+| Provisioning | QR code (left half) + BLE name suffix (right half) |
+| Joining | `Joining LoRaWAN… This can take up to 2 minutes.` |
 | Idle / LoRa connected | Kid name, RSSI (dBm), battery bar + %, queued message badge |
-| Sending | "Transmitting…" + queued count |
-| WiFi sync | "WiFi connected. Syncing messages…" |
+| Sending | `Transmitting…` + queued count |
+| WiFi sync | `WiFi connected. Syncing messages…` |
 | Incoming message | Sender label + body (word-wrapped at 21 chars/line) |
-| Error | "ERROR" header + wrapped message text |
+| Error | `ERROR` header + wrapped message text |
 
 ---
 
@@ -218,25 +269,28 @@ Messages that fail to send over WiFi are left in the NVS queue and retried on th
 
 ```
 src/
-  main.cpp              State machine + Arduino setup/loop
-  frame.cpp / .h        LoRa frame encode/decode (matches server exactly)
-  provisioning.cpp / .h BLE GATT first-boot wizard + NVS persistence
-  lorawan.cpp / .h      LMIC OTAA join, uplink, downlink, ping
-  wifi_sync.cpp / .h    WiFi HTTPS POST/GET sync with Glustick server
-  display.cpp / .h      OLED UI (U8g2) — all display states + QR rendering
-  message_queue.cpp / .h NVS-backed outbound message queue
+├── main.cpp              State machine · Arduino setup() / loop()
+├── frame.cpp / .h        LoRa frame encode/decode — matches server exactly
+├── provisioning.cpp / .h BLE GATT first-boot wizard + NVS persistence
+├── lorawan.cpp / .h      LMIC OTAA join, uplink, downlink, ping
+├── wifi_sync.cpp / .h    WiFi HTTPS POST/GET sync with Glustick server
+├── display.cpp / .h      OLED UI (U8g2) — all display states + QR rendering
+└── message_queue.cpp / .h NVS-backed outbound message queue (survives reboots)
 include/
-  config.h              Pin mapping (SPI/SDA/SCL/RST/DIO), NVS keys, timeouts
+└── config.h              Pin mapping, NVS keys, timeouts, frame constants
 scripts/
-  patch_lmic.py         Pre-build: patches MCCI LMIC's project_config for SX1262
-platformio.ini          PlatformIO project config — two envs: heltec_v3, heltec_v3_eu868
+└── patch_lmic.py         Pre-build: patches MCCI LMIC project_config for SX1262
+platformio.ini            Two envs: heltec_v3 (US915) · heltec_v3_eu868 (EU868)
 ```
 
 ---
 
 ## Related
 
-- [Glustick Family server](https://github.com/tkhemraj/glustick-family) — the Go backend these devices talk to
-- [Meshtastic](https://meshtastic.org/) — recommended no-firmware-needed alternative transport
-- [ChirpStack](https://www.chirpstack.io/) — self-hosted LoRaWAN network server for the infrastructure path
-- [MCCI LMIC](https://github.com/mcci-catena/arduino-lmic) — LoRaWAN stack for Arduino
+| Project | Description |
+|---|---|
+| [Glustick Family](https://github.com/tkhemraj/glustick-family) | Go backend these devices talk to — routing, content filtering, delivery pipeline |
+| [Meshtastic](https://meshtastic.org/) | Recommended no-firmware-needed alternative transport |
+| [ChirpStack](https://www.chirpstack.io/) | Self-hosted LoRaWAN network server for the infrastructure path |
+| [MCCI LMIC](https://github.com/mcci-catena/arduino-lmic) | LoRaWAN stack for Arduino — OTAA join, Class A uplink/downlink, SX1262 HAL |
+| [Heltec WiFi LoRa 32 V3](https://heltec.org/project/wifi-lora-32-v3/) | The hardware these devices run on |
