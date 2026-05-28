@@ -134,29 +134,31 @@ pio run -e heltec_v3_eu868 --target upload
 
 ## First boot — provisioning
 
-On first boot the device derives its identity from the chip eFuse MAC, displays a QR code on the OLED, and waits up to **5 minutes** for the Glustick Family mobile app.
+On first boot the device derives its identity from the chip eFuse MAC, generates a random AppKey, displays a QR code and pairing PIN on the OLED, and waits up to **5 minutes** for the Glustick Family mobile app.
 
 ```
 ┌──────────────────────────────────────┐
-│ ▓▓▓▓▓▓▓▓▓▓▓▓   SCAN TO              │
-│ ▓         ▓▓   REGISTER             │
-│ ▓  ██████ ▓▓                        │
-│ ▓  ██████ ▓▓   OR BLE:              │
-│ ▓         ▓▓   A1B2                 │
-│ ▓▓▓▓▓▓▓▓▓▓▓▓                        │
+│ ▓▓▓▓▓▓▓▓▓▓▓▓   SCAN QR              │
+│ ▓         ▓▓                        │
+│ ▓  ██████ ▓▓   BLE:                 │
+│ ▓  ██████ ▓▓   A1B2                 │
+│ ▓         ▓▓   PIN:                 │
+│ ▓▓▓▓▓▓▓▓▓▓▓▓   847291               │
 └──────────────────────────────────────┘
   Device OLED during provisioning
 ```
 
 **Provisioning flow**
 
-1. **Power on.** The device derives a DevEUI from the chip eFuse MAC using the IEEE EUI-64 rule and generates a deterministic default AppKey. The QR code and BLE name appear on the OLED.
+1. **Power on.** The device derives a DevEUI from the chip eFuse MAC using the IEEE EUI-64 rule and generates a cryptographically random AppKey (`esp_fill_random`). The QR code, BLE name suffix, and a random 6-digit pairing PIN appear on the OLED.
 
 2. **Scan or connect via BLE.** Open the Glustick Family app → <kbd>Settings</kbd> → <kbd>Glustick Link</kbd> → <kbd>Add device</kbd>. Scan the QR to pre-fill credentials, or tap <kbd>Set up via Bluetooth</kbd> and connect to `GsfLink-XXXX`.
 
-3. **App writes credentials via GATT.** Eight characteristics are written in sequence (see table below). Values are staged in RAM until commit — an interrupted write leaves NVS untouched.
+3. **Enter the pairing PIN.** When your phone's Bluetooth pairing dialog appears, enter the 6-digit PIN shown on the OLED. All characteristic reads and writes are rejected until the encrypted authenticated connection is established.
 
-4. **Device reboots.** BLE advertising stops. The device joins LoRaWAN (up to 2 minutes) and connects to WiFi if credentials were provided.
+4. **App writes credentials via GATT.** Ten characteristics are written in sequence (see table below). Values are staged in RAM until commit — an interrupted write leaves NVS untouched.
+
+5. **Device reboots.** BLE advertising stops. The device joins LoRaWAN (up to 2 minutes) and connects to WiFi if credentials were provided.
 
 > [!WARNING]
 > Provisioning times out after **5 minutes** if the app does not connect. Power cycle to retry.
@@ -173,11 +175,13 @@ Version-3 alphanumeric QR, ECC\_LOW. Rendered at 2×2 px per module into the lef
 
 ### DevEUI derivation
 
-`provisioning_derive_defaults()` derives the DevEUI from the chip's 48-bit eFuse MAC using the IEEE EUI-64 rule: `{mac[0]^0x02}:{mac[1]}:{mac[2]}:FF:FE:{mac[3]}:{mac[4]}:{mac[5]}`. The result is deterministic and unique per chip.
+`provisioning_derive_defaults()` derives the DevEUI from the chip's 48-bit eFuse MAC using the IEEE EUI-64 rule: `{mac[0]^0x02}:{mac[1]}:{mac[2]}:FF:FE:{mac[3]}:{mac[4]}:{mac[5]}`, where `mac[0]` is the most-significant (OUI) byte. The result is deterministic and unique per chip.
+
+The AppKey is generated with `esp_fill_random()` — it is never derivable from public device information. The QR code carries the generated AppKey so the app can pre-fill it; the BLE characteristics allow it to be replaced with a network-issued key.
 
 ### BLE GATT characteristics
 
-The app negotiates a 512-byte MTU, then writes these 9 characteristics in sequence:
+The app negotiates a 512-byte MTU and must complete BLE Secure Connections pairing (PIN displayed on OLED) before any characteristic access is permitted. It then writes these 10 characteristics in sequence:
 
 | UUID (suffix) | Value written |
 |---|---|
@@ -189,9 +193,13 @@ The app negotiates a 512-byte MTU, then writes these 9 characteristics in sequen
 | `…-000000000006` | WiFi SSID (optional) |
 | `…-000000000007` | WiFi password (optional) |
 | `…-000000000008` | Kid's name (shown on OLED) |
-| `…-000000000009` | Commit — write `"1"` to persist all |
+| `…-000000000009` | Commit — write `"1"` to persist all staged values |
+| `…-00000000000a` | Server TLS cert — PEM string for `setCACert()` (optional) |
 
 Full UUID prefix: `12345678-1234-1234-1234-`
+
+> [!NOTE]
+> The server TLS cert characteristic (`…000a`) is optional but strongly recommended. When provisioned, the device pins TLS connections to that certificate using `setCACert()`. When absent, connections fall back to `setInsecure()`. To get your server's PEM: `openssl s_client -connect yourserver:443 </dev/null 2>/dev/null | openssl x509 -outform PEM`
 
 ---
 
@@ -248,14 +256,14 @@ The device POSTs outbound messages and polls for inbound messages every **30 sec
 | `POST` | `/api/v1/lora/uplink` | Send outbound message — body JSON, `Authorization: Bearer` header |
 | `GET` | `/api/v1/lora/downlink` | Poll for inbound messages — returns JSON array |
 
-TLS is used for all requests. Self-signed certificates are accepted (`setInsecure()`), appropriate for a family-owned server. Messages that fail to send over WiFi are left in the NVS queue and retried on the next cycle, or sent over LoRa if WiFi drops.
+TLS is used for all requests. If a server PEM cert was provisioned via BLE characteristic `…000a`, the device calls `setCACert()` to pin connections to that certificate. If no cert was provisioned, `setInsecure()` is used as a fallback — see the provisioning section above for how to set this up. Messages that fail to send over WiFi are left in the NVS queue and retried on the next cycle, or sent over LoRa if WiFi drops.
 
 ### OLED display states
 
 | State | Display |
 |---|---|
 | Boot | `Glustick Link` + firmware version |
-| Provisioning | QR code (left half) + BLE name suffix (right half) |
+| Provisioning | QR code (left half) + BLE name suffix and 6-digit pairing PIN (right half) |
 | Joining | `Joining LoRaWAN… This can take up to 2 minutes.` |
 | Idle / LoRa connected | Kid name, RSSI (dBm), battery bar + %, queued message badge |
 | Sending | `Transmitting…` + queued count |
