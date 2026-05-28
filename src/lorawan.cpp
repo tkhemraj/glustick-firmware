@@ -18,11 +18,12 @@ static LoRaDownlinkCb  s_downlink_cb = nullptr;
 
 // Reassembly buffer for multi-chunk downlinks
 static struct {
-    uint16_t msg_id;
-    uint8_t  total;
-    uint8_t  received;
-    char     buf[MSG_BODY_MAX + 1];
-    bool     slot_received[8];  // supports up to 8 chunks
+    uint16_t      msg_id;
+    uint8_t       total;
+    uint8_t       received;
+    char          buf[MSG_BODY_MAX + 1];
+    bool          slot_received[8];
+    unsigned long started;  // millis() when first chunk arrived
 } s_reassemble;
 
 // ── LMIC pin mapping for Heltec WiFi LoRa 32 V3 (SX1262) ────────────────────
@@ -51,11 +52,13 @@ void os_getDevKey(u1_t *buf) {
     memcpy(buf, s_app_key, 16);
 }
 
-static void parse_hex_str(const char *hex, uint8_t *out, size_t out_len) {
+static bool parse_hex_str(const char *hex, uint8_t *out, size_t out_len) {
+    if (strlen(hex) < out_len * 2) return false;
     for (size_t i = 0; i < out_len; i++) {
         char byte_str[3] = { hex[i*2], hex[i*2+1], '\0' };
         out[i] = (uint8_t)strtoul(byte_str, nullptr, 16);
     }
+    return true;
 }
 
 static void handle_downlink(uint8_t *payload, size_t len) {
@@ -76,11 +79,15 @@ static void handle_downlink(uint8_t *payload, size_t len) {
     }
 
     // Multi-chunk reassembly
-    if (f.msg_id != s_reassemble.msg_id) {
-        // New message — reset reassembly state
+    // Reset on new msg_id or if the previous reassembly stalled past the server's
+    // 2-minute Redis TTL (chunks it never received won't arrive after that).
+    bool stale = s_reassemble.received > 0
+              && (millis() - s_reassemble.started) > 120000UL;
+    if (f.msg_id != s_reassemble.msg_id || stale) {
         s_reassemble.msg_id   = f.msg_id;
         s_reassemble.total    = f.chunk_total;
         s_reassemble.received = 0;
+        s_reassemble.started  = millis();
         memset(s_reassemble.buf, 0, sizeof(s_reassemble.buf));
         memset(s_reassemble.slot_received, 0, sizeof(s_reassemble.slot_received));
     }
@@ -128,9 +135,12 @@ void lora_init(
     const char *app_key_hex,
     LoRaDownlinkCb downlink_cb
 ) {
-    parse_hex_str(dev_eui_hex, s_dev_eui, 8);
-    parse_hex_str(app_eui_hex, s_app_eui, 8);
-    parse_hex_str(app_key_hex, s_app_key, 16);
+    if (!parse_hex_str(dev_eui_hex, s_dev_eui, 8) ||
+        !parse_hex_str(app_eui_hex, s_app_eui, 8) ||
+        !parse_hex_str(app_key_hex, s_app_key, 16)) {
+        display_show_error("Bad key format\nRe-provision device");
+        return;
+    }
     s_downlink_cb = downlink_cb;
 
     os_init_ex(&lmic_pins);

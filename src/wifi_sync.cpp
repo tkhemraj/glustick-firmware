@@ -6,20 +6,23 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
-static char         s_server_url[128]  = {};
-static char         s_parent_tok[256]  = {};
-static InboundMsgCb s_inbound_cb       = nullptr;
-static unsigned long s_last_sync       = 0;
+static char         s_server_url[128]   = {};
+static char         s_parent_tok[256]   = {};
+static char         s_server_cert[2048] = {};  // PEM cert for TLS pinning, or empty
+static InboundMsgCb s_inbound_cb        = nullptr;
+static unsigned long s_last_sync        = 0;
 
 bool wifi_sync_init(
     const char *ssid,
     const char *password,
     const char *server_url,
     const char *parent_token,
+    const char *server_cert,
     InboundMsgCb on_inbound
 ) {
-    strncpy(s_server_url, server_url, sizeof(s_server_url) - 1);
-    strncpy(s_parent_tok, parent_token, sizeof(s_parent_tok) - 1);
+    strncpy(s_server_url,  server_url,   sizeof(s_server_url)  - 1);
+    strncpy(s_parent_tok,  parent_token, sizeof(s_parent_tok)  - 1);
+    strncpy(s_server_cert, server_cert,  sizeof(s_server_cert) - 1);
     s_inbound_cb = on_inbound;
 
     if (strlen(ssid) == 0) return false;
@@ -36,11 +39,21 @@ bool wifi_sync_connected() {
     return WiFi.status() == WL_CONNECTED;
 }
 
+static void apply_tls(WiFiClientSecure &client) {
+    if (strlen(s_server_cert) > 0) {
+        client.setCACert(s_server_cert);
+    } else {
+        // No cert provisioned — connections are unauthenticated.
+        // Provision the server PEM cert via the Glustick app to enable pinning.
+        client.setInsecure();
+    }
+}
+
 static bool http_post_message(const char *body) {
     if (!wifi_sync_connected()) return false;
 
     WiFiClientSecure client;
-    client.setInsecure();  // Self-signed certs OK for family server
+    apply_tls(client);
     HTTPClient http;
 
     char url[192];
@@ -49,9 +62,10 @@ static bool http_post_message(const char *body) {
     http.addHeader("Content-Type", "application/json");
     http.addHeader("Authorization", String("Bearer ") + s_parent_tok);
 
-    // Build minimal JSON payload
+    JsonDocument doc;
+    doc["body"] = body;
     char payload[MSG_BODY_MAX + 64];
-    snprintf(payload, sizeof(payload), "{\"body\":\"%s\"}", body);
+    serializeJson(doc, payload, sizeof(payload));
 
     int code = http.POST(payload);
     http.end();
@@ -62,7 +76,7 @@ static void http_poll_inbound() {
     if (!wifi_sync_connected() || !s_inbound_cb) return;
 
     WiFiClientSecure client;
-    client.setInsecure();
+    apply_tls(client);
     HTTPClient http;
 
     char url[192];
@@ -91,7 +105,7 @@ void wifi_sync_flush() {
         if (http_post_message(msg.body)) {
             queue_mark_acked(msg.id);
         } else {
-            break; // stop on first failure; retry next cycle
+            break;
         }
     }
     queue_flush_acked();

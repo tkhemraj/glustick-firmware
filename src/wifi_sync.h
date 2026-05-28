@@ -5,11 +5,13 @@
 typedef void (*InboundMsgCb)(const char *body);
 
 // Connect to WiFi and start periodic sync with the Glustick server.
+// server_cert: PEM cert for TLS pinning via setCACert(); empty = setInsecure().
 bool wifi_sync_init(
     const char *ssid,
     const char *password,
     const char *server_url,
     const char *parent_token,
+    const char *server_cert,
     InboundMsgCb on_inbound
 );
 

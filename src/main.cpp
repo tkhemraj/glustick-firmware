@@ -16,6 +16,7 @@ static char g_parent_tok[256] = {};
 static char g_wifi_ssid[64]  = {};
 static char g_wifi_pass[64]  = {};
 static char g_kid_name[32]   = {};
+static char g_server_cert[2048] = {};
 
 static DeviceState g_state = STATE_PROVISIONING;
 
@@ -100,7 +101,7 @@ void setup() {
     if (!provisioning_load(
             g_dev_eui, g_app_eui, g_app_key,
             g_server_url, g_parent_tok,
-            g_wifi_ssid, g_wifi_pass, g_kid_name)) {
+            g_wifi_ssid, g_wifi_pass, g_kid_name, g_server_cert)) {
         display_show_error("NVS read failed");
         enter_state(STATE_ERROR);
         return;
@@ -110,6 +111,7 @@ void setup() {
     bool has_wifi = wifi_sync_init(
         g_wifi_ssid, g_wifi_pass,
         g_server_url, g_parent_tok,
+        g_server_cert,
         on_wifi_inbound
     );
 

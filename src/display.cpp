@@ -152,7 +152,7 @@ void display_set_lora_rssi(int rssi) {
     s_rssi = rssi;
 }
 
-void display_show_provisioning_qr(const char *dev_eui, const char *app_eui, const char *app_key, const char *ble_name) {
+void display_show_provisioning_qr(const char *dev_eui, const char *app_eui, const char *app_key, const char *ble_name, uint32_t pin_code) {
     // Alphanumeric QR payload: "GSF:{devEUI}:{appEUI}:{appKey}" = 70 chars
     // Version 3 + ECC_LOW supports 77 alphanumeric chars — fits exactly.
     char qr_data[72];
@@ -180,16 +180,20 @@ void display_show_provisioning_qr(const char *dev_eui, const char *app_eui, cons
         }
     }
 
-    // Right 64px: white text on black background (already black from clearBuffer)
+    // Right 62px: BLE name suffix and BLE pairing PIN
     u8g2.setDrawColor(1);
     u8g2.setFont(u8g2_font_4x6_tf);
-    u8g2.drawStr(66, 10, "SCAN TO");
-    u8g2.drawStr(66, 18, "REGISTER");
-    u8g2.drawStr(66, 32, "OR BLE:");
-    // Show last 4 hex chars (after the dash in "GsfLink-A1B2")
+    u8g2.drawStr(66, 10, "SCAN QR");
+    u8g2.drawStr(66, 22, "BLE:");
     const char *suffix = strrchr(ble_name, '-');
     u8g2.setFont(u8g2_font_5x7_tf);
-    u8g2.drawStr(66, 44, suffix ? suffix + 1 : ble_name);
+    u8g2.drawStr(66, 32, suffix ? suffix + 1 : ble_name);
+    u8g2.setFont(u8g2_font_4x6_tf);
+    u8g2.drawStr(66, 46, "PIN:");
+    char pin_buf[8];
+    snprintf(pin_buf, sizeof(pin_buf), "%06lu", (unsigned long)pin_code);
+    u8g2.setFont(u8g2_font_5x7_tf);
+    u8g2.drawStr(66, 56, pin_buf);
 
     u8g2.sendBuffer();
 }

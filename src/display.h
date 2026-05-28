@@ -12,4 +12,4 @@ void display_show_sending(uint8_t pending);
 void display_show_wifi_sync();
 void display_show_error(const char *msg);
 void display_set_lora_rssi(int rssi);
-void display_show_provisioning_qr(const char *dev_eui, const char *app_eui, const char *app_key, const char *ble_name);
+void display_show_provisioning_qr(const char *dev_eui, const char *app_eui, const char *app_key, const char *ble_name, uint32_t pin_code);
