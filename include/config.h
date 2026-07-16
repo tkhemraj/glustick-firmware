@@ -42,5 +42,15 @@ typedef enum {
 #define MSG_ID_MAX              0xFFFF
 
 // ── Display ───────────────────────────────────────────────────────────────────
-#define DISPLAY_WIDTH   128
-#define DISPLAY_HEIGHT  64
+// Heltec V3 defaults — T-Deck overrides these via build flags in platformio.ini
+#ifndef DISPLAY_WIDTH
+#  define DISPLAY_WIDTH   128
+#endif
+#ifndef DISPLAY_HEIGHT
+#  define DISPLAY_HEIGHT  64
+#endif
+
+// ── T-Deck compose buffer ─────────────────────────────────────────────────────
+#ifdef BOARD_TDECK
+#  define COMPOSE_BUF_MAX  MSG_BODY_MAX
+#endif

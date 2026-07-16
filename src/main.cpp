@@ -6,6 +6,9 @@
 #include "wifi_sync.h"
 #include "message_queue.h"
 #include "frame.h"
+#ifdef BOARD_TDECK
+#  include "keyboard.h"
+#endif
 
 // ── Device context (loaded from NVS after provisioning) ──────────────────────
 static char g_dev_eui[17]    = {};
@@ -21,6 +24,13 @@ static char g_server_cert[2048] = {};
 static DeviceState g_state = STATE_PROVISIONING;
 
 static unsigned long g_last_ping_ms = 0;
+
+#ifdef BOARD_TDECK
+// Compose buffer — accumulates keyboard input until Enter is pressed
+static char     g_compose[COMPOSE_BUF_MAX] = {};
+static uint16_t g_compose_len              = 0;
+static bool     g_compose_dirty            = false;
+#endif
 
 // ── Battery reading ───────────────────────────────────────────────────────────
 static int read_battery_pct() {
@@ -80,9 +90,13 @@ void setup() {
     analogReadResolution(12);
     analogSetAttenuation(ADC_11db);
 
-    display_init();
+    display_init();  // also drives TDECK_POWERON_PIN HIGH on T-Deck
     display_show_boot();
     delay(1500);
+
+#ifdef BOARD_TDECK
+    keyboard_init();
+#endif
 
     queue_init();
 
@@ -171,4 +185,41 @@ void loop() {
             last_display_ms = millis();
         }
     }
+
+#ifdef BOARD_TDECK
+    // Keyboard input: accumulate chars, send on Enter, backspace to delete.
+    // Only active when we have a working connection and are in a steady state.
+    if (g_state == STATE_LORA_CONNECTED || g_state == STATE_WIFI_CONNECTED || g_state == STATE_IDLE) {
+        char k = keyboard_read();
+        if (k != 0) {
+            if (k == '\r' || k == '\n') {
+                // Send the message if compose buffer is non-empty
+                if (g_compose_len > 0) {
+                    g_compose[g_compose_len] = '\0';
+                    uint16_t id = queue_next_msg_id();
+                    queue_push_outbound(id, g_compose);
+                    g_compose_len = 0;
+                    g_compose[0]  = '\0';
+                    // Flush immediately over WiFi; LoRa send happens in main loop above
+                    if (wifi_up) wifi_sync_flush();
+                }
+                display_show_idle(g_kid_name, lora_last_rssi(), read_battery_pct(), queue_outbound_count());
+            } else if (k == '\b' && g_compose_len > 0) {
+                // Backspace
+                g_compose[--g_compose_len] = '\0';
+                g_compose_dirty = true;
+            } else if (k >= 0x20 && g_compose_len < COMPOSE_BUF_MAX - 1) {
+                // Printable character
+                g_compose[g_compose_len++] = k;
+                g_compose[g_compose_len]   = '\0';
+                g_compose_dirty = true;
+            }
+
+            if (g_compose_dirty) {
+                display_show_compose(g_compose);
+                g_compose_dirty = false;
+            }
+        }
+    }
+#endif
 }

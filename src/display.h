@@ -13,3 +13,6 @@ void display_show_wifi_sync();
 void display_show_error(const char *msg);
 void display_set_lora_rssi(int rssi);
 void display_show_provisioning_qr(const char *dev_eui, const char *app_eui, const char *app_key, const char *ble_name, uint32_t pin_code);
+// T-Deck: updates the compose strip at the bottom of the screen with current draft.
+// No-op on Heltec V3.
+void display_show_compose(const char *draft);
