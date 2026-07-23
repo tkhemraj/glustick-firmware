@@ -66,16 +66,24 @@ static void draw_battery_bar(int pct, bool wifi, bool lora) {
 }
 
 void display_init() {
-    // T-Deck power-on latch — must be HIGH or the board powers off
+    // Power-on latch — must go HIGH before anything else or the board shuts off
     pinMode(TDECK_POWERON_PIN, OUTPUT);
     digitalWrite(TDECK_POWERON_PIN, HIGH);
+
+    // Backlight on immediately so we can see if TFT init hangs (white screen = alive)
+    pinMode(TFT_BL, OUTPUT);
+    digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
+
+    // Deassert all SPI CS pins before initialising the bus.
+    // A floating SD card CS corrupts the first TFT SPI transaction.
+    pinMode(TDECK_SD_CS, OUTPUT);
+    digitalWrite(TDECK_SD_CS, HIGH);
+    pinMode(PIN_LMIC_NSS, OUTPUT);
+    digitalWrite(PIN_LMIC_NSS, HIGH);
 
     tft.init();
     tft.setRotation(1);  // landscape, keyboard at the bottom
     tft.fillScreen(C_BG);
-
-    pinMode(TFT_BL, OUTPUT);
-    digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
 }
 
 void display_show_boot() {
