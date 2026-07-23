@@ -1,3 +1,7 @@
+// Compiled only for the self-hosted LoRaWAN build.
+// P2P and Meshtastic builds use radio_p2p.cpp / radio_meshtastic.cpp instead.
+#if !defined(TRANSPORT_P2P) && !defined(TRANSPORT_MESHTASTIC)
+
 #include "lorawan.h"
 #include "display.h"
 #include <lmic.h>
@@ -143,6 +147,13 @@ void lora_init(
     }
     s_downlink_cb = downlink_cb;
 
+#ifdef BOARD_TDECK
+    // T-Deck's SX1262 and ST7789 share SCK/MISO/MOSI with separate CS pins.
+    // LMIC's ESP32-S3 HAL would call SPI.begin() with board defaults (GPIO
+    // 11/13/12), which are wrong. Pre-initialise here so the HAL finds the
+    // bus already up on the correct pins and leaves them alone.
+    SPI.begin(TDECK_SPI_SCK, TDECK_SPI_MISO, TDECK_SPI_MOSI, PIN_LMIC_NSS);
+#endif
     os_init_ex(&lmic_pins);
     LMIC_reset();
     // Disable link check validation (not supported by all networks)
@@ -197,3 +208,5 @@ void lora_ping(uint16_t msg_id) {
 
 bool lora_is_joined() { return s_joined; }
 int  lora_last_rssi()  { return s_last_rssi; }
+
+#endif // !TRANSPORT_P2P && !TRANSPORT_MESHTASTIC

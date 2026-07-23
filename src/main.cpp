@@ -2,7 +2,13 @@
 #include "config.h"
 #include "display.h"
 #include "provisioning.h"
-#include "lorawan.h"
+#if defined(TRANSPORT_P2P)
+#  include "radio_p2p.h"
+#elif defined(TRANSPORT_MESHTASTIC)
+#  include "radio_meshtastic.h"
+#else
+#  include "lorawan.h"   // default: self-hosted LoRaWAN via MCCI LMIC
+#endif
 #include "wifi_sync.h"
 #include "message_queue.h"
 #include "frame.h"
