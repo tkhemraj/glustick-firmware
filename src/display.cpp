@@ -12,6 +12,15 @@
 
 static TFT_eSPI tft;
 
+// Runs after GPIO is ready but BEFORE setup() — earliest safe point to latch
+// the PMIC power pin. Without this the PMIC may cut power before setup() starts.
+extern "C" void initVariant() {
+    pinMode(TDECK_POWERON_PIN, OUTPUT);
+    digitalWrite(TDECK_POWERON_PIN, HIGH);
+    pinMode(TFT_BL, OUTPUT);
+    digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);  // white = alive diagnostic
+}
+
 // ── Palette ───────────────────────────────────────────────────────────────────
 #define C_BG        0x0D0Du   // deep navy  (#0D0D1A)
 #define C_HDR       0x1082u   // dark slate (#102244 approx)
