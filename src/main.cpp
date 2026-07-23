@@ -202,8 +202,7 @@ void loop() {
                 // Send the message if compose buffer is non-empty
                 if (g_compose_len > 0) {
                     g_compose[g_compose_len] = '\0';
-                    uint16_t id = queue_next_msg_id();
-                    queue_push_outbound(id, g_compose);
+                    queue_push_outbound(g_compose);
                     g_compose_len = 0;
                     g_compose[0]  = '\0';
                     // Flush immediately over WiFi; LoRa send happens in main loop above
