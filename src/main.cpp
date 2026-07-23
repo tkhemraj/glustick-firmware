@@ -91,6 +91,16 @@ static void enter_state(DeviceState next) {
 
 // ── Arduino entry points ──────────────────────────────────────────────────────
 void setup() {
+#ifdef BOARD_TDECK
+    // Power-on latch — must be the very first GPIO action.
+    // The PMIC cuts power if GPIO10 is not HIGH within milliseconds of reset.
+    pinMode(TDECK_POWERON_PIN, OUTPUT);
+    digitalWrite(TDECK_POWERON_PIN, HIGH);
+    // Backlight on immediately so a white screen confirms we're running.
+    pinMode(TFT_BL, OUTPUT);
+    digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
+#endif
+
     Serial.begin(115200);
 
     analogReadResolution(12);
