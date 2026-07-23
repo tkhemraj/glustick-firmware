@@ -79,10 +79,9 @@ void display_init() {
     pinMode(TDECK_POWERON_PIN, OUTPUT);
     digitalWrite(TDECK_POWERON_PIN, HIGH);
 
-    // Backlight on immediately — white screen = code is running
+    // Backlight on before tft.init() — white screen means we're alive
     pinMode(TFT_BL, OUTPUT);
     digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
-    delay(2000);  // DIAG: hold white 2s so we can distinguish "alive" from "dead"
 
     // Deassert all SPI CS pins before initialising the bus.
     // A floating SD card CS corrupts the first TFT SPI transaction.
