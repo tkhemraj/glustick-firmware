@@ -187,8 +187,13 @@ void setup() {
     // Meshtastic: private channel with community relay + optional WiFi/MQTT bridge.
     queue_clear();
     {
+#if defined(MESH_NODE_NAME)
+        strncpy(g_kid_name, MESH_NODE_NAME, sizeof(g_kid_name) - 1);
+        g_kid_name[sizeof(g_kid_name) - 1] = '\0';
+#else
         uint64_t m = ESP.getEfuseMac();
         snprintf(g_kid_name, sizeof(g_kid_name), "Dev-%04X", (uint16_t)(m & 0xFFFF));
+#endif
     }
 
     // ── WiFi credentials setup ───────────────────────────────────────────────
@@ -395,8 +400,8 @@ void loop() {
                 // Send the message if compose buffer is non-empty
                 if (g_compose_len > 0) {
                     g_compose[g_compose_len] = '\0';
-                    display_push_message(g_kid_name, g_compose, true);
 #ifdef TRANSPORT_P2P
+                    display_push_message(g_kid_name, g_compose, true);
                     // P2P: fire-and-forget directly; no queue, no ACK needed
                     {
                         static uint16_t s_p2p_seq = 1;
@@ -406,10 +411,14 @@ void loop() {
                     }
 #elif defined(TRANSPORT_MESHTASTIC)
                     {
+                        // Prepend name so receiver sees "LBCForever: hi" in the chat body
+                        char full_body[32 + 2 + COMPOSE_BUF_MAX];
+                        snprintf(full_body, sizeof(full_body), "%s: %s", g_kid_name, g_compose);
+                        display_push_message(g_kid_name, full_body, true);
                         static uint16_t s_mesh_seq = 1;
                         bool mqtt_ok = wifi_mesh_mqtt_up();
                         display_show_sending(0);
-                        bool lora_ok = lora_send(g_compose, s_mesh_seq++);
+                        bool lora_ok = lora_send(full_body, s_mesh_seq++);
                         display_show_sent_path(lora_ok, mqtt_ok);
                         delay(700);
                         display_refresh_status();
