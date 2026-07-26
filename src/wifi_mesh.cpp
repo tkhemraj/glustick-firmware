@@ -15,7 +15,7 @@
 #define MQTT_PORT      1883
 #define MQTT_USER      "meshdev"
 #define MQTT_PASS      "large4cats"
-#define MQTT_TOPIC_PFX "msh/2/e/GluStic"
+#define MQTT_TOPIC_PFX "msh/2/e/LongFast"
 
 #define DEDUP_SIZE          16
 #define RECONNECT_MS        8000
@@ -33,9 +33,8 @@ static char         s_channel[32] = {};
 static WifiMeshRxCb s_rx_cb    = nullptr;
 
 static char         s_gateway_id[12]    = {};  // "!a1b2c3d4"
-static char         s_topic_tx[64]      = {};  // GluStic publish topic
-static char         s_topic_sub[64]     = {};  // GluStic subscribe topic
-static char         s_topic_longfast[64]= {};  // LongFast shadow-publish topic
+static char         s_topic_tx[64]      = {};  // LongFast publish topic
+static char         s_topic_sub[64]     = {};  // LongFast subscribe topic
 
 static WiFiClient   s_wifi_client;
 static PubSubClient s_mqtt(s_wifi_client);
@@ -274,21 +273,21 @@ static volatile int s_tx_tail = 0;
 static uint8_t s_tx_mp[260];
 static uint8_t s_tx_env[320];
 
-static void publish_longfast_announce() {
+static void publish_announce() {
     if (!s_mqtt.connected()) return;
 
-    snprintf(s_pb_long_name,  sizeof(s_pb_long_name),  "GluStic %s", s_gateway_id + 1);
-    snprintf(s_pb_short_name, sizeof(s_pb_short_name), "GS%02X", (uint8_t)(s_node_id & 0xFF));
+    snprintf(s_pb_long_name,  sizeof(s_pb_long_name),  "Remotest %s", s_gateway_id + 1);
+    snprintf(s_pb_short_name, sizeof(s_pb_short_name), "RM%02X", (uint8_t)(s_node_id & 0xFF));
 
     size_t data_len = encode_nodeinfo(s_pb_data, s_gateway_id,
                                        s_pb_long_name, s_pb_short_name);
-    aes_ctr_inplace(LONGFAST_PSK, s_node_id, s_lf_pkt_id, s_pb_data, data_len);
+    aes_ctr_inplace(s_psk, s_node_id, s_lf_pkt_id, s_pb_data, data_len);
 
     size_t mp_len  = encode_mesh_packet(s_pb_mp, 0xFFFFFFFF, s_node_id, s_lf_pkt_id,
                                          s_pb_data, data_len, 3);
     size_t env_len = encode_service_envelope(s_pb_env, s_pb_mp, mp_len,
-                                              LONGFAST_CHANNEL, s_gateway_id);
-    s_mqtt.publish(s_topic_longfast, s_pb_env, (unsigned int)env_len, false);
+                                              s_channel, s_gateway_id);
+    s_mqtt.publish(s_topic_tx, s_pb_env, (unsigned int)env_len, false);
     s_lf_pkt_id++;
     s_last_announce_ms = millis();
 }
@@ -301,23 +300,7 @@ static void mqtt_connect_once() {
     if (!s_mqtt.connect(client_id, MQTT_USER, MQTT_PASS)) return;
 
     s_mqtt.subscribe(s_topic_sub);
-
-    snprintf(s_pb_long_name,  sizeof(s_pb_long_name),  "GluStic %s", s_gateway_id + 1);
-    snprintf(s_pb_short_name, sizeof(s_pb_short_name), "GS%02X", (uint8_t)(s_node_id & 0xFF));
-
-    size_t  data_len = encode_nodeinfo(s_pb_data, s_gateway_id,
-                                        s_pb_long_name, s_pb_short_name);
-    static uint32_t ni_pkt_id = 0xBB000001;
-    aes_ctr_inplace(s_psk, s_node_id, ni_pkt_id, s_pb_data, data_len);
-
-    size_t mp_len  = encode_mesh_packet(s_pb_mp, 0xFFFFFFFF, s_node_id, ni_pkt_id,
-                                         s_pb_data, data_len, 3);
-    size_t env_len = encode_service_envelope(s_pb_env, s_pb_mp, mp_len,
-                                              s_channel, s_gateway_id);
-    s_mqtt.publish(s_topic_tx, s_pb_env, (unsigned int)env_len, false);
-
-    // Also announce on LongFast so we appear on the public Meshtastic map
-    publish_longfast_announce();
+    publish_announce();
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -329,10 +312,9 @@ void wifi_mesh_init(uint32_t node_id, const uint8_t psk[16],
     strncpy(s_channel, channel, sizeof(s_channel) - 1);
     s_rx_cb   = cb;
 
-    snprintf(s_gateway_id,    sizeof(s_gateway_id),    "!%08lx",          (unsigned long)node_id);
-    snprintf(s_topic_tx,      sizeof(s_topic_tx),      "%s/%s",           MQTT_TOPIC_PFX, s_gateway_id);
-    snprintf(s_topic_sub,     sizeof(s_topic_sub),      "%s/#",            MQTT_TOPIC_PFX);
-    snprintf(s_topic_longfast, sizeof(s_topic_longfast), "msh/2/e/LongFast/%s", s_gateway_id);
+    snprintf(s_gateway_id, sizeof(s_gateway_id), "!%08lx", (unsigned long)node_id);
+    snprintf(s_topic_tx,   sizeof(s_topic_tx),   "%s/%s", MQTT_TOPIC_PFX, s_gateway_id);
+    snprintf(s_topic_sub,  sizeof(s_topic_sub),  "%s/#",  MQTT_TOPIC_PFX);
 
     s_mqtt.setServer(MQTT_HOST, MQTT_PORT);
     s_mqtt.setCallback(on_mqtt_message);
@@ -416,9 +398,9 @@ static void wifi_mesh_task_fn(void * /*arg*/) {
                 s_tx_tail = (s_tx_tail + 1) % TX_QUEUE_SIZE;
             }
 
-            // Periodic LongFast re-announce
+            // Periodic NodeInfo re-announce
             if (millis() - s_last_announce_ms >= ANNOUNCE_INTERVAL_MS) {
-                publish_longfast_announce();
+                publish_announce();
             }
             delay(10);
         }
@@ -487,13 +469,13 @@ void wifi_mesh_publish_position(float lat, float lon) {
     dp += pb_bytes(dp, 2, pos, pp - pos);
     size_t data_len = dp - s_pb_data;
 
-    aes_ctr_inplace(LONGFAST_PSK, s_node_id, s_lf_pkt_id, s_pb_data, data_len);
+    aes_ctr_inplace(s_psk, s_node_id, s_lf_pkt_id, s_pb_data, data_len);
 
     size_t mp_len  = encode_mesh_packet(s_pb_mp, 0xFFFFFFFF, s_node_id, s_lf_pkt_id,
                                          s_pb_data, data_len, 3);
     size_t env_len = encode_service_envelope(s_pb_env, s_pb_mp, mp_len,
-                                              LONGFAST_CHANNEL, s_gateway_id);
-    s_mqtt.publish(s_topic_longfast, s_pb_env, (unsigned int)env_len, false);
+                                              s_channel, s_gateway_id);
+    s_mqtt.publish(s_topic_tx, s_pb_env, (unsigned int)env_len, false);
     s_lf_pkt_id++;
 }
 

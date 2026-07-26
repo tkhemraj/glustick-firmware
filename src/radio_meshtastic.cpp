@@ -123,8 +123,8 @@ static bool decode_text(const uint8_t *buf, size_t len,
 void lora_init(const char *dev_eui_hex, const char *app_eui_hex,
                const char * /*app_key_hex*/, LoRaDownlinkCb cb) {
     s_cb = cb;
-    memcpy(s_psk, GLUSTICK_PSK, 16);
-    s_chan_hash = glustick_chan_hash();
+    memcpy(s_psk, LONGFAST_PSK, 16);
+    s_chan_hash = longfast_chan_hash();
 
     // Lower 32 bits of eFuse MAC — stable unique node ID, no init required
     uint64_t mac = ESP.getEfuseMac();

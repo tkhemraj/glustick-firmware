@@ -194,8 +194,8 @@ void setup() {
     // ── WiFi credentials setup ───────────────────────────────────────────────
     {
         uint32_t mesh_node_id = (uint32_t)(ESP.getEfuseMac() & 0xFFFFFFFF);
-        uint8_t  chan_hash    = glustick_chan_hash();
-        wifi_mesh_init(mesh_node_id, GLUSTICK_PSK, GLUSTICK_CHANNEL,
+        uint8_t  chan_hash    = longfast_chan_hash();
+        wifi_mesh_init(mesh_node_id, LONGFAST_PSK, LONGFAST_CHANNEL,
                        chan_hash, on_wifi_downlink);
 
         // Build-flag creds always win — they overwrite whatever is in NVS.
