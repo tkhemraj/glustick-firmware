@@ -9,12 +9,13 @@ typedef void (*WifiMeshRxCb)(const char *body);
 // Initialise WiFi+MQTT subsystem.  Call once in setup() before wifi_mesh_begin().
 // node_id:   this device's 32-bit Meshtastic node ID (lower 32 bits of eFuse MAC)
 // psk:       16-byte AES PSK matching radio_meshtastic.cpp
-// channel:   channel name string (e.g. "GluStic")
+// channel:   channel name string (e.g. "LongFast")
 // chan_hash:  1-byte channel hash
+// node_name: human-readable device name (e.g. "LBCForever") — used in NodeInfo announce
 // cb:        invoked for every inbound text message
 void wifi_mesh_init(uint32_t node_id, const uint8_t psk[16],
                     const char *channel, uint8_t chan_hash,
-                    WifiMeshRxCb cb);
+                    const char *node_name, WifiMeshRxCb cb);
 
 // Load WiFi credentials from NVS (namespace "gsf_wifi").
 // Returns true if a non-empty SSID was found.

@@ -252,6 +252,7 @@ static void on_mqtt_message(char * /*topic*/, uint8_t *payload, unsigned int len
 static uint8_t s_pb_data[128];
 static uint8_t s_pb_mp[260];   // 260 = worst-case header(12) + max-payload(240) + tag/len(8)
 static uint8_t s_pb_env[320];
+static char    s_node_name[32]    = {};
 static char    s_pb_long_name[32];
 static char    s_pb_short_name[8];
 
@@ -276,8 +277,10 @@ static uint8_t s_tx_env[320];
 static void publish_announce() {
     if (!s_mqtt.connected()) return;
 
-    snprintf(s_pb_long_name,  sizeof(s_pb_long_name),  "Remotest %s", s_gateway_id + 1);
-    snprintf(s_pb_short_name, sizeof(s_pb_short_name), "RM%02X", (uint8_t)(s_node_id & 0xFF));
+    strncpy(s_pb_long_name, s_node_name, sizeof(s_pb_long_name) - 1);
+    s_pb_long_name[sizeof(s_pb_long_name) - 1] = '\0';
+    strncpy(s_pb_short_name, s_node_name, 4);
+    s_pb_short_name[4] = '\0';
 
     size_t data_len = encode_nodeinfo(s_pb_data, s_gateway_id,
                                        s_pb_long_name, s_pb_short_name);
@@ -306,10 +309,11 @@ static void mqtt_connect_once() {
 // ── Public API ────────────────────────────────────────────────────────────────
 void wifi_mesh_init(uint32_t node_id, const uint8_t psk[16],
                     const char *channel, uint8_t /*chan_hash*/,
-                    WifiMeshRxCb cb) {
+                    const char *node_name, WifiMeshRxCb cb) {
     s_node_id = node_id;
     memcpy(s_psk, psk, 16);
     strncpy(s_channel, channel, sizeof(s_channel) - 1);
+    strncpy(s_node_name, node_name ? node_name : "GluStick", sizeof(s_node_name) - 1);
     s_rx_cb   = cb;
 
     snprintf(s_gateway_id, sizeof(s_gateway_id), "!%08lx", (unsigned long)node_id);
