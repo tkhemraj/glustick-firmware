@@ -32,6 +32,8 @@ typedef enum {
 #define NVS_KEY_PROVISIONED "provisioned"
 #define NVS_KEY_KID_NAME    "kid_name"
 #define NVS_KEY_SERVER_CERT "srv_cert"  // PEM cert for TLS pinning (optional)
+#define NVS_KEY_P2P_NET_KEY "p2p_key"   // 32-char hex shared key (P2P mode)
+#define NVS_KEY_P2P_PAIRED  "p2p_paired" // bool — set when devices have paired
 
 // ── Timeouts / intervals ──────────────────────────────────────────────────────
 #define PING_INTERVAL_MS        (5UL * 60 * 1000)   // 5 min keepalive ping

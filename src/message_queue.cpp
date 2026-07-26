@@ -101,6 +101,12 @@ void queue_flush_acked() {
     for (uint8_t i = 0; i < q_count; i++) persist_slot(i);
 }
 
+void queue_clear() {
+    q_count = 0;
+    prefs.clear();                       // wipe entire "gsf_q" namespace from NVS
+    prefs.putUShort("next_id", next_id); // preserve the ID counter to avoid reuse
+}
+
 uint16_t queue_next_msg_id() {
     return next_id;
 }

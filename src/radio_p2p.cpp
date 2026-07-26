@@ -67,8 +67,8 @@ void lora_init(const char *dev_eui_hex, const char *app_eui_hex,
     // Pre-configure shared SPI bus before RadioLib touches it
     SPI.begin(TDECK_SPI_SCK, TDECK_SPI_MISO, TDECK_SPI_MOSI, PIN_LMIC_NSS);
 
-    // SF7 BW125 CR4/5 — ~5.5 kbps, 1-5 km
-    int rc = s_radio.begin(P2P_FREQ_MHZ, 125.0, 7, 5,
+    // SF10 BW125 CR4/5 — ~1 kbps, 5-15 km
+    int rc = s_radio.begin(P2P_FREQ_MHZ, 125.0, 10, 5,
                            RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 22, 8);
     if (rc != RADIOLIB_ERR_NONE) {
         display_show_error("P2P radio init\nfailed");

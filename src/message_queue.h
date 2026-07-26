@@ -17,4 +17,5 @@ bool     queue_pop_outbound(QueuedMessage *out);         // returns false if emp
 void     queue_mark_acked(uint16_t id);
 uint8_t  queue_outbound_count();
 void     queue_flush_acked();
+void     queue_clear();          // wipe all messages (both in-memory and NVS)
 uint16_t queue_next_msg_id();

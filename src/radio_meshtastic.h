@@ -34,4 +34,8 @@ bool lora_is_joined();
 // RSSI of the last received packet (dBm), 0 if none yet.
 int lora_last_rssi();
 
+// Node ID of the first peer heard on the mesh.  0 = no peer seen yet.
+// Used by glustic-fun to address GPS packets directly.
+uint32_t lora_peer_node_id();
+
 #endif // TRANSPORT_MESHTASTIC

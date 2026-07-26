@@ -1,6 +1,8 @@
 #ifdef TRANSPORT_MESHTASTIC
 
 #include "radio_meshtastic.h"
+#include "mesh_config.h"
+#include "wifi_mesh.h"
 #include "display.h"
 #include <RadioLib.h>
 #include <SPI.h>
@@ -9,19 +11,10 @@
 // ── Meshtastic LongFast PHY (US915 primary channel) ──────────────────────────
 // SF9, BW250, CR4/5, preamble 16, private sync word 0x12
 // Frequency is set by MESH_FREQ_MHZ build flag (default 906.875 MHz).
-// To find your mesh's exact frequency: Meshtastic app → Radio config → LoRa → Frequency slot.
 #define MESH_SF          9
 #define MESH_BW          250.0f
 #define MESH_CR          5       // CR4/5
 #define MESH_PREAMBLE    16
-
-// ── Meshtastic default public channel PSK ("LongFast", AQ== PSK = 0x01 expanded) ──
-// This is the well-known Meshtastic default key. All nodes on the public mesh
-// use this. Override by provisioning a custom app_key.
-static const uint8_t DEFAULT_PSK[16] = {
-    0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59,
-    0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01
-};
 
 // ── Meshtastic v2 packet header (16 bytes, transmitted unencrypted) ───────────
 // Ref: https://github.com/meshtastic/firmware/blob/master/src/mesh/RadioInterface.h
@@ -43,6 +36,7 @@ static Module s_mod(PIN_LMIC_NSS, PIN_LMIC_DIO1, PIN_LMIC_RST, LORA_BUSY_PIN);
 static SX1262 s_radio(&s_mod);
 
 static uint32_t       s_node_id    = 0;
+static uint32_t       s_peer_id    = 0;        // first peer we receive from; 0 = unknown
 static uint32_t       s_packet_id  = 0;
 static int            s_last_rssi  = 0;
 static bool           s_ready      = false;
@@ -82,17 +76,6 @@ static void aes_ctr_inplace(const uint8_t *key, uint32_t from, uint32_t pkt_id,
     size_t  nc_off = 0;
     mbedtls_aes_crypt_ctr(&ctx, len, &nc_off, nonce, stream_block, buf, buf);
     mbedtls_aes_free(&ctx);
-}
-
-// ── Channel hash ──────────────────────────────────────────────────────────────
-// Meshtastic computes a 1-byte hash over (channel name bytes + PSK bytes).
-// This hash is embedded in every packet header so nodes can quickly discard
-// packets on other channels without decrypting them.
-static uint8_t compute_channel_hash(const char *name, const uint8_t *psk) {
-    uint8_t h = 0;
-    for (const char *c = name; *c; c++) h = (h + (uint8_t)*c) & 0xFF;
-    for (int i = 0; i < 16; i++)        h = (h + psk[i]) & 0xFF;
-    return h;
 }
 
 // ── Minimal protobuf encoder for Data{portnum=1, payload=text} ───────────────
@@ -136,26 +119,12 @@ static bool decode_text(const uint8_t *buf, size_t len,
     return false;
 }
 
-// ── PSK parsing ───────────────────────────────────────────────────────────────
-static void load_psk(const char *hex) {
-    bool has_key = strlen(hex) >= 32;
-    if (has_key) {
-        for (int i = 0; i < 16; i++) {
-            char b[3] = { hex[i * 2], hex[i * 2 + 1], '\0' };
-            s_psk[i] = (uint8_t)strtoul(b, nullptr, 16);
-        }
-    } else {
-        memcpy(s_psk, DEFAULT_PSK, 16);
-    }
-}
-
 // ── Init ──────────────────────────────────────────────────────────────────────
 void lora_init(const char *dev_eui_hex, const char *app_eui_hex,
-               const char *app_key_hex, LoRaDownlinkCb cb) {
+               const char * /*app_key_hex*/, LoRaDownlinkCb cb) {
     s_cb = cb;
-
-    load_psk(app_key_hex);
-    s_chan_hash = compute_channel_hash("LongFast", s_psk);
+    memcpy(s_psk, GLUSTICK_PSK, 16);
+    s_chan_hash = glustick_chan_hash();
 
     // Lower 32 bits of eFuse MAC — stable unique node ID, no init required
     uint64_t mac = ESP.getEfuseMac();
@@ -196,7 +165,10 @@ void lora_loop() {
         return;
     }
 
-    uint8_t buf[256];
+    // Static — keeps these 256+240 bytes off the loopTask stack.
+    static uint8_t buf[256];
+    static char    text[240];
+
     if (pkt_len > sizeof(buf)) {
         s_radio.startReceive();
         return;
@@ -217,13 +189,20 @@ void lora_loop() {
 
     s_last_rssi = (int)s_radio.getRSSI();
 
+    // Track the first peer we hear from — used for unicast replies
+    if (s_peer_id == 0 && hdr->from != s_node_id) {
+        s_peer_id = hdr->from;
+    }
+
+    // Dedup: skip delivery if this packet already arrived via MQTT (WiFi path)
+    if (wifi_mesh_dedup(hdr->id)) return;
+
     // Decrypt payload in-place
     uint8_t *payload     = buf + sizeof(MeshHeader);
     size_t   payload_len = pkt_len - sizeof(MeshHeader);
     aes_ctr_inplace(s_psk, hdr->from, hdr->id, payload, payload_len);
 
-    // Decode and deliver text messages
-    char text[240];
+    // Decode and deliver text messages (text[] is static, declared above)
     if (decode_text(payload, payload_len, text, sizeof(text))) {
         if (s_cb) s_cb(text);
     }
@@ -236,7 +215,10 @@ bool lora_send(const char *body, uint16_t msg_id) {
     uint8_t buf[256];
     MeshHeader *hdr = (MeshHeader *)buf;
 
-    hdr->to       = 0xFFFFFFFF;     // broadcast
+    // Unicast once peer is known; broadcast until then.
+    // Community nodes still relay unicast packets — only the app-layer delivery
+    // at the destination is filtered by the 'to' field.
+    hdr->to       = s_peer_id ? s_peer_id : 0xFFFFFFFF;
     hdr->from     = s_node_id;
     hdr->id       = ++s_packet_id;
     // hop_start = hop_limit = 3, want_ack = 0, via_mqtt = 0
@@ -249,6 +231,10 @@ bool lora_send(const char *body, uint16_t msg_id) {
 
     aes_ctr_inplace(s_psk, s_node_id, hdr->id, payload, plen);
 
+    // Dual-path: also publish over MQTT if WiFi mesh is connected.
+    // wifi_mesh_send() is a no-op when MQTT is not available.
+    wifi_mesh_send(hdr->to, s_node_id, hdr->id, payload, plen, 3);
+
     s_in_tx   = true;
     s_tx_done = false;
     s_radio.startTransmit(buf, sizeof(MeshHeader) + plen);
@@ -260,7 +246,8 @@ void lora_ping(uint16_t /*msg_id*/) {
     // The mesh will route our text messages regardless of whether we announce.
 }
 
-bool lora_is_joined() { return s_ready; }
-int  lora_last_rssi()  { return s_last_rssi; }
+bool     lora_is_joined()      { return s_ready; }
+int      lora_last_rssi()      { return s_last_rssi; }
+uint32_t lora_peer_node_id()   { return s_peer_id; }
 
 #endif // TRANSPORT_MESHTASTIC

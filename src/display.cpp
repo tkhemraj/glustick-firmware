@@ -2,345 +2,768 @@
 #include "config.h"
 
 // ═════════════════════════════════════════════════════════════════════════════
-// T-Deck — ST7789 320×240 colour TFT via TFT_eSPI
+// T-Deck — ST7789 320×240 IPS — production chat UI
 // ═════════════════════════════════════════════════════════════════════════════
 #ifdef BOARD_TDECK
 
-#include <TFT_eSPI.h>
-#include <SPI.h>
+#include <Arduino_GFX_Library.h>
+#include <Wire.h>
 #include <qrcode.h>
+#include "fonts/FreeSansBold10pt7b.h"
 
-static TFT_eSPI tft;
+static constexpr int8_t DISP_DC   = 11;
+static constexpr int8_t DISP_CS   = 12;
+static constexpr int8_t DISP_SCK  = 40;
+static constexpr int8_t DISP_MOSI = 41;
+static constexpr int8_t DISP_MISO = 38;
+static constexpr int8_t DISP_RST  = -1;
 
-// Runs after GPIO is ready but BEFORE setup() — earliest safe point to latch
-// the PMIC power pin. Without this the PMIC may cut power before setup() starts.
-extern "C" void initVariant() {
-    pinMode(TDECK_POWERON_PIN, OUTPUT);
-    digitalWrite(TDECK_POWERON_PIN, HIGH);
-    pinMode(TFT_BL, OUTPUT);
-    digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);  // white = alive diagnostic
+static Arduino_DataBus *s_bus = nullptr;
+static Arduino_GFX     *gfx  = nullptr;
+
+// ── Purple palette (RGB565) ──────────────────────────────────────────────────
+static constexpr uint16_t C_BG         = 0x0844u;  // #0D0820 deep purple-black
+static constexpr uint16_t C_HDR        = 0x2048u;  // #200845 dark header
+static constexpr uint16_t C_ACCENT     = 0x9A79u;  // #9D4DC9 vibrant purple
+static constexpr uint16_t C_ACCENT2    = 0xC43Fu;  // #C084FC lavender
+static constexpr uint16_t C_TEXT       = 0xFFFFu;
+static constexpr uint16_t C_DIM        = 0x7B51u;  // muted purple-grey
+static constexpr uint16_t C_WARN       = 0xFC60u;  // amber
+static constexpr uint16_t C_ERR        = 0xF800u;
+static constexpr uint16_t C_OK         = 0x07E0u;
+static constexpr uint16_t C_BUBBLE_IN  = 0x1867u;  // dark purple incoming
+static constexpr uint16_t C_BUBBLE_OUT = 0x28ABu;  // medium purple outgoing
+static constexpr uint16_t C_BLACK      = 0x0000u;
+static constexpr uint16_t C_WHITE      = 0xFFFFu;
+
+static const int16_t W = DISPLAY_WIDTH;   // 320
+static const int16_t H = DISPLAY_HEIGHT;  // 240
+
+// ── Layout ───────────────────────────────────────────────────────────────────
+static constexpr int16_t STAT_H = 28;          // status bar at top
+static constexpr int16_t COMP_H = 28;          // compose bar at bottom
+static constexpr int16_t MSG_Y0 = STAT_H;      // = 28, top of chat area
+static constexpr int16_t MSG_Y1 = H - COMP_H;  // = 212, bottom of chat area
+
+// ── Message ring buffer ───────────────────────────────────────────────────────
+static constexpr int CHAT_MSGS_MAX = 16;
+static constexpr int CHAT_BODY_MAX = 128;
+static constexpr int CHAT_FROM_MAX = 20;
+
+struct ChatMsg { char body[CHAT_BODY_MAX]; char from[CHAT_FROM_MAX]; bool outgoing; };
+static ChatMsg s_msgs[CHAT_MSGS_MAX];
+static int     s_msg_total = 0;  // total inserted (wraps mod CHAT_MSGS_MAX)
+
+static inline int chat_count() {
+    return s_msg_total < CHAT_MSGS_MAX ? s_msg_total : CHAT_MSGS_MAX;
+}
+// msg_at(0)=oldest visible, msg_at(count-1)=newest
+static inline const ChatMsg *msg_at(int i) {
+    int n = chat_count();
+    if (i < 0 || i >= n) return nullptr;
+    int base = s_msg_total >= CHAT_MSGS_MAX ? s_msg_total % CHAT_MSGS_MAX : 0;
+    return &s_msgs[(base + i) % CHAT_MSGS_MAX];
 }
 
-// ── Palette ───────────────────────────────────────────────────────────────────
-#define C_BG        0x0D0Du   // deep navy  (#0D0D1A)
-#define C_HDR       0x1082u   // dark slate (#102244 approx)
-#define C_ACCENT    0x07E0u   // green      (TFT_GREEN)
-#define C_TEXT      TFT_WHITE
-#define C_DIM       0x8410u   // mid-grey
-#define C_WARN      0xFC00u   // amber
-#define C_ERR       0xF800u   // red        (TFT_RED)
-#define C_BUBBLE_IN  0x1082u  // incoming message bubble
-#define C_BUBBLE_OUT 0x0421u  // outgoing message bubble (dark green-ish)
+// ── Cached device state (used by partial redraws) ────────────────────────────
+static char s_dev_name[32]            = "Glustick";
+static int  s_rssi_val                = 0;
+static int  s_bat_val                 = 100;
+static int  s_wifi_rssi               = 0;     // 0=not connected, negative=connected
+static bool s_mqtt_conn               = false;
+static char s_compose_buf[COMPOSE_BUF_MAX] = {};
+static int  s_scroll                  = 0;  // 0=latest at bottom, +n=scrolled back
 
-static const uint16_t W = DISPLAY_WIDTH;   // 320
-static const uint16_t H = DISPLAY_HEIGHT;  // 240
+// FreeSansBold10pt7b: baseline is ~11 px below cell top
+static constexpr int16_t FB = 11;
 
-// ── Header bar (top 28 px) ────────────────────────────────────────────────────
-static void draw_header(const char *title, const char *right_label = nullptr) {
-    tft.fillRect(0, 0, W, 28, C_HDR);
-    tft.setTextColor(C_ACCENT, C_HDR);
-    tft.setTextFont(2);  // 16px
-    tft.setCursor(6, 6);
-    tft.print(title);
-    if (right_label) {
-        tft.setTextColor(C_DIM, C_HDR);
-        tft.setTextFont(1);  // 8px
-        int x = W - strlen(right_label) * 6 - 4;
-        tft.setCursor(x, 10);
-        tft.print(right_label);
+// ── Font / colour helpers ────────────────────────────────────────────────────
+static void sans() { gfx->setFont(&FreeSansBold10pt7b); }
+static void dflt() { gfx->setFont(nullptr); }
+
+static void tleft(const char *s, int16_t x, int16_t row_top,
+                  uint16_t col, uint16_t bg, bool use_sans = true) {
+    if (use_sans) sans(); else dflt();
+    gfx->setTextColor(col, bg);
+    gfx->setCursor(x, row_top + FB);
+    gfx->print(s);
+}
+
+static void tcenter(const char *s, int16_t rx, int16_t rw, int16_t row_top,
+                    uint16_t col, uint16_t bg, bool use_sans = true) {
+    if (use_sans) sans(); else dflt();
+    gfx->setTextColor(col, bg);
+    int16_t x1, y1; uint16_t tw, th;
+    gfx->getTextBounds(s, 0, row_top + FB, &x1, &y1, &tw, &th);
+    gfx->setCursor(rx + (rw - (int16_t)tw) / 2 - x1, row_top + FB);
+    gfx->print(s);
+}
+static void tcenter(const char *s, int16_t row_top,
+                    uint16_t col, uint16_t bg, bool use_sans = true) {
+    tcenter(s, 0, W, row_top, col, bg, use_sans);
+}
+
+// ── Word-wrap renderer (returns y after last line) ───────────────────────────
+static int16_t draw_wrapped(const char *text,
+                             int16_t x, int16_t y,
+                             int16_t max_w, int16_t max_y,
+                             uint16_t col, uint16_t bg) {
+    sans();
+    gfx->setTextColor(col, bg);
+    const int16_t LINE_H = 16;
+    char word[64];
+    int ti = 0, len = (int)strlen(text);
+    int16_t cx = x, cy = y + FB;
+
+    while (ti < len && cy - FB + LINE_H <= max_y) {
+        int wi = 0;
+        while (ti < len && text[ti] != ' ' && text[ti] != '\n' && wi < 62)
+            word[wi++] = text[ti++];
+        word[wi] = '\0';
+        bool nl = (wi > 0 && ti < len && text[ti] == '\n');
+        if (ti < len && (text[ti] == ' ' || text[ti] == '\n')) ti++;
+        if (wi == 0) { cy += LINE_H; cx = x; continue; }
+
+        int16_t x1, y1; uint16_t tw, th;
+        gfx->getTextBounds(word, cx, cy, &x1, &y1, &tw, &th);
+        if (cx > x && cx + (int16_t)tw > x + max_w) {
+            cy += LINE_H; cx = x;
+            gfx->getTextBounds(word, cx, cy, &x1, &y1, &tw, &th);
+        }
+        gfx->setCursor(cx, cy); gfx->print(word);
+        cx += (int16_t)tw + 5;
+        if (nl) { cy += LINE_H; cx = x; }
     }
-    tft.drawFastHLine(0, 28, W, C_ACCENT);
+    return cy - FB;
 }
 
-// ── Battery bar (bottom 18 px) ────────────────────────────────────────────────
-static void draw_battery_bar(int pct, bool wifi, bool lora) {
-    tft.fillRect(0, H - 18, W, 18, C_HDR);
-    tft.drawFastHLine(0, H - 18, W, C_DIM);
+// Count lines needed to word-wrap text into max_w (uses FreeSansBold metrics)
+static int count_lines(const char *text, int16_t max_w) {
+    sans();
+    int lines = 1;
+    int16_t cx = 0;
+    char word[64];
+    int ti = 0, len = (int)strlen(text);
 
-    // Battery pill on the right
-    uint16_t bat_col = pct > 25 ? C_ACCENT : (pct > 10 ? C_WARN : C_ERR);
-    tft.drawRect(W - 38, H - 14, 32, 10, C_DIM);
-    tft.fillRect(W - 36, H - 12, (pct * 28) / 100, 6, bat_col);
-    tft.fillRect(W - 6, H - 11, 3, 4, C_DIM);  // nub
+    while (ti < len) {
+        int wi = 0;
+        while (ti < len && text[ti] != ' ' && text[ti] != '\n' && wi < 62)
+            word[wi++] = text[ti++];
+        word[wi] = '\0';
+        bool nl = (ti < len && text[ti] == '\n');
+        if (ti < len) ti++;
+        if (wi == 0) { if (nl) { lines++; cx = 0; } continue; }
 
-    // Radio indicators on left
-    tft.setTextFont(1);
-    tft.setCursor(4, H - 13);
-    tft.setTextColor(wifi ? C_ACCENT : C_DIM, C_HDR);
-    tft.print("WiFi");
-    tft.setTextColor(C_DIM, C_HDR);
-    tft.print(" | ");
-    tft.setTextColor(lora ? C_ACCENT : C_DIM, C_HDR);
-    tft.print("LoRa");
+        int16_t x1, y1; uint16_t tw, th;
+        gfx->getTextBounds(word, cx, 20, &x1, &y1, &tw, &th);
+        if (cx > 0 && cx + (int16_t)tw > max_w) {
+            lines++; cx = 0;
+            gfx->getTextBounds(word, 0, 20, &x1, &y1, &tw, &th);
+        }
+        cx += (int16_t)tw + 5;
+        if (nl) { lines++; cx = 0; }
+    }
+    return lines;
 }
+
+static int16_t bubble_h(const char *text, int16_t text_max_w) {
+    return (int16_t)(count_lines(text, text_max_w) * 16 + 16);
+}
+
+// ── Status bar (top 28 px) ───────────────────────────────────────────────────
+// Layout from right edge (W=320):
+//   LoRa bars (4): W-30 .. W-4    (always)
+//   WiFi bars (3): W-48 .. W-34   (colour = connected; dim = not)
+//   MQTT dot:      cx=W-57        (green = connected; dim = not)
+//   Battery:       W-90 .. W-68   (with 2px nub at W-68)
+static void draw_status_bar() {
+    gfx->fillRect(0, 0, W, STAT_H, C_HDR);
+    gfx->drawFastHLine(0, STAT_H - 1, W, C_ACCENT);
+
+    // Device name (left)
+    sans();
+    gfx->setTextColor(C_ACCENT2, C_HDR);
+    gfx->setCursor(10, STAT_H - 7);
+    gfx->print(s_dev_name);
+
+    // Battery percentage label (right-aligned, ends at bx-3)
+    dflt(); gfx->setTextSize(1);
+    char bat_pct_str[5];
+    snprintf(bat_pct_str, sizeof(bat_pct_str), "%d%%", s_bat_val);
+    uint16_t bat_col = s_bat_val > 25 ? C_OK : (s_bat_val > 10 ? C_WARN : C_ERR);
+    // each char is 6px wide in default font; right-align against x=W-95
+    int pct_chars = (int)strlen(bat_pct_str);
+    gfx->setTextColor(bat_col, C_HDR);
+    gfx->setCursor(W - 95 - pct_chars * 6, (STAT_H - 8) / 2);
+    gfx->print(bat_pct_str);
+
+    // Battery icon — 22×10 px at x=W-90
+    const int bx = W - 90, by = (STAT_H - 10) / 2;
+    gfx->drawRect(bx, by, 22, 10, C_DIM);
+    int bfill = (s_bat_val * 20) / 100;
+    if (bfill > 0) gfx->fillRect(bx + 1, by + 1, bfill, 8, bat_col);
+    gfx->fillRect(bx + 22, by + 3, 2, 4, C_DIM);
+
+    // MQTT dot — cx=W-57, radius 3
+    const int mcy = STAT_H / 2;
+    uint16_t mqtt_col = s_mqtt_conn ? C_OK : C_DIM;
+    gfx->fillCircle(W - 57, mcy, 4, C_HDR);         // erase first
+    gfx->fillCircle(W - 57, mcy, 3, mqtt_col);
+
+    // WiFi bars — 3 bars, 4 px wide, rising heights, x = W-48
+    static const int8_t WH[3] = { 4, 7, 10 };
+    int wifi_bars = 0;
+    if (s_wifi_rssi < 0) {
+        wifi_bars = s_wifi_rssi >= -55 ? 3 : s_wifi_rssi >= -70 ? 2 : 1;
+    }
+    for (int i = 0; i < 3; i++) {
+        int wbx = (W - 48) + i * 6;
+        int wby = STAT_H - 3 - WH[i];
+        uint16_t wc = (i < wifi_bars) ? C_ACCENT2 : C_DIM;
+        gfx->fillRect(wbx, wby, 4, WH[i], wc);
+    }
+
+    // LoRa signal bars — 4 bars of increasing height, x = W-30 (unchanged)
+    bool linked = (s_rssi_val != 0);
+    int bars = !linked ? 0 :
+               s_rssi_val >= -60 ? 4 : s_rssi_val >= -70 ? 3 :
+               s_rssi_val >= -80 ? 2 : 1;
+    static const int8_t BH[4] = { 4, 6, 8, 10 };
+    for (int i = 0; i < 4; i++) {
+        int bbx = (W - 30) + i * 7;
+        int bby = STAT_H - 3 - BH[i];
+        gfx->fillRect(bbx, bby, 5, BH[i], i < bars ? C_OK : C_DIM);
+    }
+}
+
+// ── Compose bar (bottom 28 px) ───────────────────────────────────────────────
+static void draw_compose_bar() {
+    const int16_t y = MSG_Y1;
+    gfx->fillRect(0, y, W, COMP_H, C_HDR);
+    gfx->drawFastHLine(0, y, W, C_ACCENT);
+
+    dflt(); gfx->setTextSize(1);
+    gfx->setTextColor(C_ACCENT2, C_HDR);
+    gfx->setCursor(8, y + 10);
+    gfx->print(">");
+
+    const char *draft = s_compose_buf;
+    int dlen = (int)strlen(draft);
+    const char *show = dlen > 46 ? draft + dlen - 46 : draft;
+    gfx->setTextColor(C_TEXT, C_HDR);
+    const int tx = 18;
+    gfx->setCursor(tx, y + 10);
+    gfx->print(show);
+
+    // Block cursor
+    int cx = tx + (int)strlen(show) * 6;
+    if (cx < W - 8) gfx->fillRect(cx, y + 4, 2, 14, C_ACCENT2);
+}
+
+// ── Chat message area (MSG_Y0..MSG_Y1) ───────────────────────────────────────
+static void draw_message_area() {
+    gfx->fillRect(0, MSG_Y0, W, MSG_Y1 - MSG_Y0, C_BG);
+
+    int n = chat_count();
+    if (n == 0) {
+        dflt(); gfx->setTextSize(1);
+        const int16_t my = (MSG_Y0 + MSG_Y1) / 2;
+        gfx->setTextColor(C_DIM, C_BG);
+        tcenter("No messages yet.", my - 8, C_DIM, C_BG, false);
+        tcenter("Type below and press Enter.", my + 8, C_DIM, C_BG, false);
+        return;
+    }
+
+    static constexpr int16_t GAP    = 6;    // gap between bubbles
+    static constexpr int16_t PADH   = 10;   // horizontal text padding inside bubble
+    static constexpr int16_t MARGIN = 10;   // screen edge margin
+    static constexpr int16_t BUB_W  = 230;  // fixed bubble width
+    static constexpr int16_t TXW    = BUB_W - PADH * 2;
+
+    // Render from bottom up — newest visible message at bottom
+    // s_scroll > 0 means the user scrolled back; offset the starting index.
+    int start = n - 1 - s_scroll;
+    if (start < 0) start = 0;
+
+    int16_t y = MSG_Y1 - GAP;
+    for (int i = start; i >= 0; i--) {
+        const ChatMsg *m = msg_at(i);
+        if (!m) break;
+
+        int16_t bh = bubble_h(m->body, TXW);
+        y -= bh;
+        if (y < MSG_Y0 + GAP) break;  // no room for more bubbles above
+
+        int16_t bx       = m->outgoing ? (W - MARGIN - BUB_W) : MARGIN;
+        uint16_t bg_col  = m->outgoing ? C_BUBBLE_OUT : C_BUBBLE_IN;
+        uint16_t bdr_col = m->outgoing ? C_ACCENT     : C_DIM;
+
+        gfx->fillRoundRect(bx, y, BUB_W, bh, 8, bg_col);
+        gfx->drawRoundRect(bx, y, BUB_W, bh, 8, bdr_col);
+        draw_wrapped(m->body, bx + PADH, y + 8, TXW, y + bh - 8, C_TEXT, bg_col);
+
+        y -= GAP;
+    }
+}
+
+// ── Power-on latch (runs before setup()) ────────────────────────────────────
+extern "C" void initVariant() {
+    pinMode(TDECK_POWERON_PIN, OUTPUT); digitalWrite(TDECK_POWERON_PIN, HIGH);
+    pinMode(TFT_BL, OUTPUT);           digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
+}
+
+// ── Public API ───────────────────────────────────────────────────────────────
 
 void display_init() {
-    // Power-on latch — must go HIGH before anything else or the board shuts off
-    pinMode(TDECK_POWERON_PIN, OUTPUT);
-    digitalWrite(TDECK_POWERON_PIN, HIGH);
+    pinMode(TDECK_POWERON_PIN, OUTPUT); digitalWrite(TDECK_POWERON_PIN, HIGH);
+    pinMode(TFT_BL, OUTPUT);           digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
+    pinMode(TDECK_SD_CS, OUTPUT);      digitalWrite(TDECK_SD_CS, HIGH);
+    pinMode(PIN_LMIC_NSS, OUTPUT);     digitalWrite(PIN_LMIC_NSS, HIGH);
 
-    // Backlight on before tft.init() — white screen means we're alive
-    pinMode(TFT_BL, OUTPUT);
-    digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
-
-    // Deassert all SPI CS pins before initialising the bus.
-    // A floating SD card CS corrupts the first TFT SPI transaction.
-    pinMode(TDECK_SD_CS, OUTPUT);
-    digitalWrite(TDECK_SD_CS, HIGH);
-    pinMode(PIN_LMIC_NSS, OUTPUT);
-    digitalWrite(PIN_LMIC_NSS, HIGH);
-
-    tft.init();
-    tft.setRotation(1);  // landscape, keyboard at the bottom
-    tft.fillScreen(C_BG);
+    s_bus = new Arduino_ESP32SPI(DISP_DC, DISP_CS, DISP_SCK, DISP_MOSI, DISP_MISO);
+    gfx  = new Arduino_ST7789(s_bus, DISP_RST, 1, true, 240, 320);
+    gfx->begin(40000000UL);
+    gfx->fillScreen(C_BG);
 }
 
 void display_show_boot() {
-    tft.fillScreen(C_BG);
-    tft.setTextColor(C_ACCENT, C_BG);
-    tft.setTextFont(4);  // 26px
-    tft.setCursor(60, 80);
-    tft.print("Glustick");
-    tft.setTextFont(2);
-    tft.setTextColor(C_DIM, C_BG);
-    tft.setCursor(128, 114);
-    tft.print("Link");
-    tft.setTextFont(1);
-    tft.setCursor(134, 136);
-    tft.print(FW_VERSION);
+    gfx->fillScreen(C_BG);
+
+    // Logo box
+    gfx->fillRect(0, 40, W, 2, C_ACCENT);
+    gfx->fillRect(0, 40, 4, 80, C_ACCENT);
+    gfx->fillRect(W - 4, 40, 4, 80, C_ACCENT);
+    gfx->fillRect(0, 120, W, 2, C_ACCENT);
+
+    sans();
+    gfx->setTextColor(0x500Bu, C_BG); gfx->setCursor(47, 93); gfx->print("Glustick");
+    gfx->setTextColor(C_ACCENT2, C_BG); gfx->setCursor(45, 91); gfx->print("Glustick");
+
+    gfx->fillRoundRect(W/2 - 24, 104, 48, 14, 4, C_HDR);
+    tcenter(FW_VERSION, 105, C_ACCENT, C_HDR, false);
+
+    gfx->drawFastHLine(40, 134, W - 80, C_HDR);
+
+    sans();
+    tcenter("Elysian v0.1", 168, C_DIM, C_BG);
 }
 
-void display_show_provisioning(const char *ble_name) {
-    tft.fillScreen(C_BG);
-    draw_header("SETUP");
-    tft.setTextColor(C_TEXT, C_BG);
-    tft.setTextFont(2);
-    tft.setCursor(20, 50);
-    tft.print("Open the Glustick app");
-    tft.setCursor(20, 74);
-    tft.print("and tap Add device.");
-    tft.setTextColor(C_DIM, C_BG);
-    tft.setTextFont(1);
-    tft.setCursor(20, 110);
-    tft.print("BLE: ");
-    tft.setTextColor(C_ACCENT, C_BG);
-    tft.print(ble_name);
+void display_show_provisioning(const char * /*ble_name*/) {
+    gfx->fillScreen(C_BG);
+    draw_status_bar();
+    tcenter("Provisioning...", (MSG_Y0 + MSG_Y1) / 2, C_DIM, C_BG);
+}
+
+// Full redraw: updates cached state, then redraws all three zones.
+// No fillScreen — each zone fills its own area, so there's no flash.
+void display_show_idle(const char *kid_name, int rssi, int battery_pct, uint8_t /*pending*/) {
+    strncpy(s_dev_name, kid_name, sizeof(s_dev_name) - 1);
+    s_rssi_val = rssi;
+    s_bat_val  = battery_pct;
+    draw_status_bar();
+    draw_message_area();
+    draw_compose_bar();
+}
+
+// Restore just the status bar — call this after display_show_sending() completes.
+void display_refresh_status() { draw_status_bar(); }
+
+// Add to chat history and redraw only the message area (status+compose untouched)
+void display_push_message(const char *from, const char *body, bool outgoing) {
+    int idx = s_msg_total % CHAT_MSGS_MAX;
+    strncpy(s_msgs[idx].body, body, CHAT_BODY_MAX - 1);
+    strncpy(s_msgs[idx].from, from, CHAT_FROM_MAX - 1);
+    s_msgs[idx].body[CHAT_BODY_MAX - 1] = '\0';
+    s_msgs[idx].from[CHAT_FROM_MAX - 1] = '\0';
+    s_msgs[idx].outgoing = outgoing;
+    s_msg_total++;
+    s_scroll = 0;  // snap to latest on new message
+    draw_message_area();
+}
+
+void display_scroll(int delta) {
+    int n = chat_count();
+    if (n == 0) return;
+    s_scroll += delta;
+    if (s_scroll < 0)       s_scroll = 0;
+    if (s_scroll >= n)      s_scroll = n - 1;
+    draw_message_area();
+}
+
+void display_touch(int16_t x, int16_t y) {
+    // Tap in compose bar: nothing extra needed — compose is always active.
+    // Tap in message area: snap scroll to latest (shows newest messages).
+    if (y >= MSG_Y1) return;  // below compose
+    if (y >= MSG_Y0 && y < MSG_Y1) {
+        if (s_scroll != 0) { s_scroll = 0; draw_message_area(); }
+    }
+}
+
+// Legacy: still works — routes into the persistent buffer
+void display_show_message(const char *from, const char *body) {
+    display_push_message(from, body, false);
+}
+
+// Only redraws the compose bar
+void display_show_compose(const char *draft) {
+    strncpy(s_compose_buf, draft, sizeof(s_compose_buf) - 1);
+    s_compose_buf[sizeof(s_compose_buf) - 1] = '\0';
+    draw_compose_bar();
+}
+
+// Briefly updates the status bar to show "Sending..." without clearing chat
+void display_show_sending(uint8_t /*pending*/) {
+    gfx->fillRect(0, 0, W, STAT_H, C_HDR);
+    gfx->drawFastHLine(0, STAT_H - 1, W, C_ACCENT);
+    sans(); gfx->setTextColor(C_WARN, C_HDR);
+    gfx->setCursor(10, STAT_H - 7); gfx->print("Sending...");
 }
 
 void display_show_joining() {
-    tft.fillScreen(C_BG);
-    draw_header("CONNECTING");
-    tft.setTextColor(C_TEXT, C_BG);
-    tft.setTextFont(2);
-    tft.setCursor(20, 60);
-    tft.print("Joining LoRaWAN...");
-    tft.setTextFont(1);
-    tft.setTextColor(C_DIM, C_BG);
-    tft.setCursor(20, 92);
-    tft.print("This can take up to 2 minutes.");
-}
-
-void display_show_idle(const char *kid_name, int rssi, int battery_pct, uint8_t pending) {
-    tft.fillScreen(C_BG);
-    draw_header("GLUSTICK LINK");
-    draw_battery_bar(battery_pct, false, rssi != 0);
-
-    // Kid name — large
-    tft.setTextFont(4);
-    tft.setTextColor(C_TEXT, C_BG);
-    tft.setCursor(20, 50);
-    tft.print(kid_name);
-
-    // RSSI
-    char rssi_buf[16];
-    snprintf(rssi_buf, sizeof(rssi_buf), "%d dBm", rssi);
-    tft.setTextFont(1);
-    tft.setTextColor(C_DIM, C_BG);
-    tft.setCursor(20, 90);
-    tft.print(rssi_buf);
-
-    // Pending badge
-    if (pending > 0) {
-        tft.fillRoundRect(20, 108, 100, 22, 4, C_WARN);
-        tft.setTextColor(TFT_BLACK, C_WARN);
-        tft.setTextFont(2);
-        char pend_buf[20];
-        snprintf(pend_buf, sizeof(pend_buf), "  %u pending", pending);
-        tft.setCursor(24, 112);
-        tft.print(pend_buf);
-    } else {
-        tft.setTextColor(C_DIM, C_BG);
-        tft.setTextFont(1);
-        tft.setCursor(20, 120);
-        tft.print("Type a message and press Enter");
-    }
-}
-
-void display_show_message(const char *from, const char *body) {
-    tft.fillScreen(C_BG);
-    draw_header("MESSAGE");
-
-    // Sender label
-    tft.setTextFont(2);
-    tft.setTextColor(C_ACCENT, C_BG);
-    tft.setCursor(10, 38);
-    tft.print(from);
-
-    // Message bubble
-    tft.fillRoundRect(8, 60, W - 16, H - 90, 6, C_BUBBLE_IN);
-    tft.setTextColor(C_TEXT, C_BUBBLE_IN);
-    tft.setTextFont(2);
-
-    // Word-wrap at ~46 chars per line in Font2 (6px wide + gap)
-    const int LINE_CHARS = 46;
-    int body_len = strlen(body);
-    int y = 68;
-    for (int i = 0; i < body_len && y < H - 38; i += LINE_CHARS) {
-        char line[47];
-        strncpy(line, body + i, LINE_CHARS);
-        line[LINE_CHARS] = '\0';
-        tft.setCursor(14, y);
-        tft.print(line);
-        y += 18;
-    }
-
-    tft.setTextFont(1);
-    tft.setTextColor(C_DIM, C_BG);
-    tft.setCursor(10, H - 26);
-    tft.print("Press any key to dismiss");
-}
-
-void display_show_compose(const char *draft) {
-    // Redraw only the compose strip at the bottom — avoids full-screen flicker
-    int strip_y = H - 46;
-    tft.fillRect(0, strip_y, W, 28, C_BUBBLE_OUT);
-    tft.drawFastHLine(0, strip_y, W, C_ACCENT);
-    tft.setTextColor(C_TEXT, C_BUBBLE_OUT);
-    tft.setTextFont(2);
-    tft.setCursor(6, strip_y + 6);
-
-    // Show last 46 chars of draft so cursor is always visible
-    int dlen = strlen(draft);
-    const char *show = dlen > 46 ? draft + dlen - 46 : draft;
-    tft.print(show);
-
-    // Blinking cursor block
-    tft.fillRect(6 + strlen(show) * 7, strip_y + 6, 7, 14, C_ACCENT);
-}
-
-void display_show_sending(uint8_t pending) {
-    tft.fillScreen(C_BG);
-    draw_header("SENDING");
-    tft.setTextFont(2);
-    tft.setTextColor(C_TEXT, C_BG);
-    tft.setCursor(20, 60);
-    char buf[40];
-    snprintf(buf, sizeof(buf), "%u message(s) queued", pending);
-    tft.print(buf);
-    tft.setTextColor(C_DIM, C_BG);
-    tft.setTextFont(1);
-    tft.setCursor(20, 86);
-    tft.print("Transmitting over LoRa...");
+    gfx->fillScreen(C_BG);
+    draw_status_bar();
+    const int16_t cy = (MSG_Y0 + MSG_Y1) / 2;
+    tcenter("Connecting...", cy - 16, C_TEXT, C_BG);
+    tcenter("This may take a moment.", cy + 4, C_DIM, C_BG);
 }
 
 void display_show_wifi_sync() {
-    tft.fillScreen(C_BG);
-    draw_header("WIFI SYNC");
-    tft.setTextFont(2);
-    tft.setTextColor(C_ACCENT, C_BG);
-    tft.setCursor(20, 60);
-    tft.print("WiFi connected.");
-    tft.setTextColor(C_DIM, C_BG);
-    tft.setTextFont(1);
-    tft.setCursor(20, 86);
-    tft.print("Syncing messages with server...");
+    gfx->fillScreen(C_BG);
+    draw_status_bar();
+    const int16_t cy = (MSG_Y0 + MSG_Y1) / 2;
+    tcenter("WiFi connected.", cy - 16, C_ACCENT2, C_BG);
+    tcenter("Syncing messages...", cy + 4, C_DIM, C_BG);
 }
 
 void display_show_error(const char *msg) {
-    tft.fillScreen(C_BG);
-    tft.fillRect(0, 0, W, 28, C_ERR);
-    tft.setTextColor(TFT_WHITE, C_ERR);
-    tft.setTextFont(2);
-    tft.setCursor(6, 6);
-    tft.print("ERROR");
-
-    tft.setTextColor(C_TEXT, C_BG);
-    tft.setTextFont(1);
-    const int LINE_CHARS = 52;
-    int len = strlen(msg), y = 40;
-    for (int i = 0; i < len && y < H - 10; i += LINE_CHARS) {
-        char line[53];
-        strncpy(line, msg + i, LINE_CHARS);
-        line[LINE_CHARS] = '\0';
-        tft.setCursor(8, y);
-        tft.print(line);
-        y += 12;
-    }
+    gfx->fillScreen(C_BG);
+    gfx->fillRect(0, 0, W, STAT_H, C_ERR);
+    gfx->drawFastHLine(0, STAT_H, W, 0xFC00u);
+    sans(); gfx->setTextColor(C_WHITE, C_ERR);
+    gfx->setCursor(10, STAT_H - 7); gfx->print("ERROR");
+    draw_wrapped(msg, 12, STAT_H + 8, W - 24, H - 20, C_TEXT, C_BG);
 }
 
-void display_set_lora_rssi(int /*rssi*/) {}  // updated on next idle refresh
+void display_set_lora_rssi(int rssi) { s_rssi_val = rssi; }
+
+void display_set_wifi_status(int wifi_rssi, bool mqtt_connected) {
+    s_wifi_rssi = wifi_rssi;
+    s_mqtt_conn = mqtt_connected;
+}
+
+// ── Wi-Fi setup screen ───────────────────────────────────────────────────────
+// active_field: 0=SSID, 1=password, -1=status only (connecting/connected/error)
+void display_show_wifi_setup(const char *ssid, const char *pass,
+                              int active_field, const char *status) {
+    gfx->fillScreen(C_BG);
+
+    // ── Header ──────────────────────────────────────────────────────────────
+    gfx->fillRect(0, 0, W, 46, C_HDR);
+    // subtle darker top edge for depth
+    gfx->fillRect(0, 0, W, 3, 0x1024u);
+    gfx->drawFastHLine(0, 45, W, C_ACCENT);
+    gfx->drawFastHLine(0, 44, W, C_ACCENT2);
+
+    sans();
+    gfx->setTextColor(C_TEXT, C_HDR);
+    gfx->setCursor(12, 30);
+    gfx->print("Wi-Fi Setup");
+
+    dflt(); gfx->setTextSize(1);
+    gfx->setTextColor(C_DIM, C_HDR);
+    gfx->setCursor(188, 18);
+    gfx->print("Meshtastic MQTT");
+
+    // ── Input field geometry ─────────────────────────────────────────────────
+    const int16_t FX = 12, FW = W - 24, FH = 38;
+
+    // ── SSID field ───────────────────────────────────────────────────────────
+    dflt(); gfx->setTextSize(1);
+    gfx->setTextColor(C_DIM, C_BG);
+    gfx->setCursor(FX, 58);
+    gfx->print("NETWORK");
+
+    bool ssid_active = (active_field == 0);
+    gfx->fillRoundRect(FX, 66, FW, FH, 6, C_HDR);
+    gfx->drawRoundRect(FX, 66, FW, FH, 6, ssid_active ? C_ACCENT : C_DIM);
+    if (ssid_active)
+        gfx->drawRoundRect(FX + 1, 67, FW - 2, FH - 2, 5, C_ACCENT2);
+
+    if (ssid && ssid[0]) {
+        sans();
+        gfx->setTextColor(C_TEXT, C_HDR);
+        // show last chars that fit (~36 glyphs ≈ 280 px in FreeSansBold10pt)
+        const char *s = ssid;
+        if ((int)strlen(ssid) > 36) s = ssid + strlen(ssid) - 36;
+        gfx->setCursor(FX + 8, 66 + 27);
+        gfx->print(s);
+
+        if (ssid_active) {
+            int16_t x1, y1; uint16_t tw, th;
+            gfx->getTextBounds(s, FX + 8, 66 + 27, &x1, &y1, &tw, &th);
+            int curs_x = FX + 8 + (int)tw + 2;
+            if (curs_x < FX + FW - 4)
+                gfx->fillRect(curs_x, 66 + 10, 2, 20, C_ACCENT2);
+        }
+    } else if (ssid_active) {
+        // empty field cursor
+        gfx->fillRect(FX + 8, 66 + 10, 2, 20, C_ACCENT2);
+    }
+
+    // ── Password field ───────────────────────────────────────────────────────
+    dflt(); gfx->setTextSize(1);
+    gfx->setTextColor(C_DIM, C_BG);
+    gfx->setCursor(FX, 116);
+    gfx->print("PASSWORD");
+
+    bool pass_active = (active_field == 1);
+    gfx->fillRoundRect(FX, 124, FW, FH, 6, C_HDR);
+    gfx->drawRoundRect(FX, 124, FW, FH, 6, pass_active ? C_ACCENT : C_DIM);
+    if (pass_active)
+        gfx->drawRoundRect(FX + 1, 125, FW - 2, FH - 2, 5, C_ACCENT2);
+
+    if (pass) {
+        int pass_len = (int)strlen(pass);
+        if (pass_len > 0) {
+            // draw filled-circle dots for each password character
+            const int DOT_R = 4, DOT_STEP = 14;
+            int max_dots = (FW - 20) / DOT_STEP;
+            int show_from = (pass_len > max_dots) ? pass_len - max_dots : 0;
+            for (int i = show_from; i < pass_len; i++) {
+                int dx = FX + 10 + (i - show_from) * DOT_STEP + DOT_R;
+                gfx->fillCircle(dx, 124 + FH / 2, DOT_R, C_ACCENT2);
+            }
+            if (pass_active) {
+                int cur_x = FX + 10 + (pass_len - show_from) * DOT_STEP;
+                if (cur_x < FX + FW - 6)
+                    gfx->fillRect(cur_x, 124 + 10, 2, 20, C_ACCENT2);
+            }
+        } else if (pass_active) {
+            gfx->fillRect(FX + 10, 124 + 10, 2, 20, C_ACCENT2);
+        }
+    }
+
+    // ── Status line ──────────────────────────────────────────────────────────
+    if (status && status[0]) {
+        uint16_t sc = C_DIM;
+        if (strstr(status, "onnect") && !strstr(status, "ing")) sc = C_OK;
+        else if (strstr(status, "ailed") || strstr(status, "rror"))  sc = C_ERR;
+        else if (strstr(status, "ing"))                               sc = C_WARN;
+
+        // animated dots for "Connecting..."
+        dflt(); gfx->setTextSize(1);
+        gfx->setTextColor(sc, C_BG);
+        gfx->setCursor(FX, 178);
+        gfx->print(status);
+    }
+
+    // ── Footer hints ─────────────────────────────────────────────────────────
+    gfx->fillRect(0, 192, W, 1, C_HDR);
+    dflt(); gfx->setTextSize(1);
+    gfx->setTextColor(C_DIM, C_BG);
+    gfx->setCursor(12, 204);
+    gfx->print("Tab=switch  Enter=next  Backspace=del");
+    gfx->setCursor(12, 220);
+    gfx->print("Leave blank + Enter = skip WiFi");
+}
 
 void display_show_provisioning_qr(
     const char *dev_eui, const char *app_eui, const char *app_key,
     const char *ble_name, uint32_t pin_code
 ) {
-    tft.fillScreen(C_BG);
-    draw_header("SCAN TO PROVISION");
+    gfx->fillScreen(C_BG);
+    draw_status_bar();
 
-    // QR payload: "GSF:{devEUI}:{appEUI}:{appKey}" — 70 chars, version 3 ECC_LOW
     char qr_data[72];
     snprintf(qr_data, sizeof(qr_data), "GSF:%s:%s:%s", dev_eui, app_eui, app_key);
-
     QRCode qrcode;
     uint8_t qr_buf[qrcode_getBufferSize(3)];
     qrcode_initText(&qrcode, qr_buf, 3, ECC_LOW, qr_data);
 
-    // Draw QR on the left: 29 modules × 5px = 145px, centred in 160px panel
     const int QR_PX  = 5;
     const int QR_OFF = (160 - qrcode.size * QR_PX) / 2;
-    tft.fillRect(0, 30, 160, H - 30, TFT_WHITE);
-    for (uint8_t y = 0; y < qrcode.size; y++) {
+    gfx->fillRect(0, STAT_H, 160, H - STAT_H, C_WHITE);
+    for (uint8_t y = 0; y < qrcode.size; y++)
         for (uint8_t x = 0; x < qrcode.size; x++) {
-            uint16_t col = qrcode_getModule(&qrcode, x, y) ? TFT_BLACK : TFT_WHITE;
-            tft.fillRect(QR_OFF + x * QR_PX, 34 + y * QR_PX, QR_PX, QR_PX, col);
+            uint16_t c = qrcode_getModule(&qrcode, x, y) ? C_BLACK : C_WHITE;
+            gfx->fillRect(QR_OFF + x*QR_PX, STAT_H + 8 + y*QR_PX, QR_PX, QR_PX, c);
+        }
+
+    dflt(); gfx->setTextSize(1);
+    gfx->setTextColor(C_DIM, C_BG);  gfx->setCursor(168, STAT_H + 12); gfx->print("BLE NAME");
+    gfx->setTextColor(C_TEXT, C_BG);
+    const char *sfx = strrchr(ble_name, '-');
+    gfx->setCursor(168, STAT_H + 22); gfx->print(sfx ? sfx + 1 : ble_name);
+    gfx->setTextColor(C_DIM, C_BG);  gfx->setCursor(168, STAT_H + 44); gfx->print("PIN");
+    char pin_buf[8]; snprintf(pin_buf, sizeof(pin_buf), "%06lu", (unsigned long)pin_code);
+    gfx->setTextSize(2); gfx->setTextColor(C_ACCENT2, C_BG);
+    gfx->setCursor(168, STAT_H + 56); gfx->print(pin_buf);
+}
+
+static uint8_t read_reg(uint8_t addr, uint8_t reg) {
+    Wire.beginTransmission(addr); Wire.write(reg); Wire.endTransmission(false);
+    Wire.requestFrom(addr, (uint8_t)1);
+    return Wire.available() ? Wire.read() : 0xFF;
+}
+
+void display_show_i2c_scan(uint32_t hold_ms) {
+    gfx->fillScreen(C_BG);
+    draw_status_bar();
+
+    uint8_t found[16]; int nf = 0;
+    for (uint8_t a = 1; a < 127; a++) {
+        Wire.beginTransmission(a);
+        if (Wire.endTransmission() == 0 && nf < 16) found[nf++] = a;
+    }
+
+    dflt(); gfx->setTextSize(1);
+    char hdr[24]; snprintf(hdr, sizeof(hdr), "Found %d device(s):", nf);
+    gfx->setTextColor(C_DIM, C_BG); gfx->setCursor(8, STAT_H + 12); gfx->print(hdr);
+
+    int y = STAT_H + 26;
+    static const uint8_t PREGS[] = { 0x00, 0x01, 0x02, 0xA3, 0xA7 };
+    for (int i = 0; i < nf; i++) {
+        char lbl[8]; snprintf(lbl, sizeof(lbl), "0x%02X ", found[i]);
+        gfx->setTextColor(C_ACCENT2, C_BG); gfx->setCursor(8, y); gfx->print(lbl);
+        gfx->setTextColor(C_TEXT, C_BG);
+        for (uint8_t r : PREGS) {
+            uint8_t v = read_reg(found[i], r);
+            char b[8]; snprintf(b, sizeof(b), "%02X:%02X ", r, v); gfx->print(b);
+        }
+        y += 14;
+    }
+    delay(hold_ms);
+}
+
+// ── P2P pairing screens ───────────────────────────────────────────────────────
+
+void display_show_p2p_mode_select() {
+    gfx->fillScreen(C_BG);
+    draw_status_bar();
+
+    const int16_t cy = MSG_Y0 + 6;
+    tcenter("How is this device connecting?", cy, C_DIM, C_BG);
+
+    // HOST box
+    gfx->fillRoundRect(14, cy + 22, 136, 92, 10, C_HDR);
+    gfx->drawRoundRect(14, cy + 22, 136, 92, 10, C_ACCENT);
+    tcenter("[H]",  14, 136, cy + 30, C_ACCENT2, C_HDR);
+    tcenter("HOST", 14, 136, cy + 50, C_TEXT,    C_HDR);
+    dflt(); gfx->setTextSize(1); gfx->setTextColor(C_DIM, C_HDR);
+    gfx->setCursor(22, cy + 94); gfx->print("generates code");
+
+    // JOIN box
+    gfx->fillRoundRect(170, cy + 22, 136, 92, 10, C_HDR);
+    gfx->drawRoundRect(170, cy + 22, 136, 92, 10, C_ACCENT);
+    tcenter("[J]",  170, 136, cy + 30, C_ACCENT2, C_HDR);
+    tcenter("JOIN", 170, 136, cy + 50, C_TEXT,    C_HDR);
+    dflt(); gfx->setTextSize(1); gfx->setTextColor(C_DIM, C_HDR);
+    gfx->setCursor(178, cy + 94); gfx->print("enters the code");
+
+    dflt(); gfx->setTextSize(1);
+    tcenter("Run this on both devices", MSG_Y1 - 18, C_DIM, C_BG, false);
+}
+
+void display_show_p2p_host(const char *code) {
+    gfx->fillScreen(C_BG);
+    draw_status_bar();
+
+    const int16_t cy = MSG_Y0 + 6;
+    tcenter("Share this code with the other device:", cy, C_DIM, C_BG);
+
+    gfx->fillRoundRect(40, cy + 22, W - 80, 54, 10, C_HDR);
+    gfx->drawRoundRect(40, cy + 22, W - 80, 54, 10, C_ACCENT);
+
+    // Spaced-out code digits
+    dflt(); gfx->setTextSize(3); gfx->setTextColor(C_ACCENT2, C_HDR);
+    int clen = (int)strlen(code), char_w = 18, gap = 6;
+    int total = clen * char_w + (clen - 1) * gap;
+    int startx = (W - total) / 2;
+    for (int i = 0; i < clen; i++) {
+        char ch[2] = { code[i], '\0' };
+        gfx->setCursor(startx, cy + 46); gfx->print(ch);
+        startx += char_w + gap;
+    }
+
+    gfx->drawFastHLine(20, cy + 86, W - 40, C_HDR);
+    tcenter("Waiting for joiner...", cy + 96, C_TEXT, C_BG);
+    dflt(); gfx->setTextSize(1);
+    tcenter("Broadcasting every 2 s", cy + 114, C_DIM, C_BG, false);
+}
+
+void display_show_p2p_join(const char *typed, int len) {
+    gfx->fillScreen(C_BG);
+    draw_status_bar();
+
+    const int16_t cy = MSG_Y0 + 6;
+    tcenter("Enter code from other device:", cy, C_DIM, C_BG);
+
+    const int BOX_W = 36, BOX_H = 44, GAP = 6;
+    int total_w = 6 * BOX_W + 5 * GAP;
+    int start_x = (W - total_w) / 2;
+    int box_y   = cy + 22;
+
+    for (int i = 0; i < 6; i++) {
+        int bx      = start_x + i * (BOX_W + GAP);
+        bool filled = (i < len);
+        bool cursor = (i == len);
+        uint16_t bg  = filled ? C_BUBBLE_OUT : C_HDR;
+        uint16_t bdr = cursor ? C_ACCENT2 : (filled ? C_ACCENT : C_DIM);
+
+        gfx->fillRoundRect(bx, box_y, BOX_W, BOX_H, 6, bg);
+        gfx->drawRoundRect(bx, box_y, BOX_W, BOX_H, 6, bdr);
+
+        if (cursor) {
+            gfx->fillRect(bx + BOX_W/2 - 2, box_y + 8, 4, BOX_H - 16, C_ACCENT2);
+        } else if (filled) {
+            dflt(); gfx->setTextSize(2); gfx->setTextColor(C_TEXT, bg);
+            char ch[2] = { typed[i], '\0' };
+            tcenter(ch, bx, BOX_W, box_y + 12, C_TEXT, bg, false);
         }
     }
 
-    // Right panel: BLE name + PIN
-    tft.setTextColor(C_DIM, C_BG);
-    tft.setTextFont(1);
-    tft.setCursor(168, 40);
-    tft.print("BLE NAME");
-
-    tft.setTextColor(C_TEXT, C_BG);
-    tft.setTextFont(2);
-    const char *suffix = strrchr(ble_name, '-');
-    tft.setCursor(168, 54);
-    tft.print(suffix ? suffix + 1 : ble_name);
-
-    tft.setTextColor(C_DIM, C_BG);
-    tft.setTextFont(1);
-    tft.setCursor(168, 92);
-    tft.print("BLE PIN");
-
-    char pin_buf[8];
-    snprintf(pin_buf, sizeof(pin_buf), "%06lu", (unsigned long)pin_code);
-    tft.setTextFont(4);
-    tft.setTextColor(C_ACCENT, C_BG);
-    tft.setCursor(168, 106);
-    tft.print(pin_buf);
-
-    tft.setTextFont(1);
-    tft.setTextColor(C_DIM, C_BG);
-    tft.setCursor(168, 158);
-    tft.print("Or scan QR with");
-    tft.setCursor(168, 170);
-    tft.print("Glustick app");
+    dflt(); gfx->setTextSize(1);
+    tcenter("Type 0-9 and A-F",           cy + 78,  C_DIM, C_BG, false);
+    tcenter("Listening for host...",       cy + 94,  C_DIM, C_BG, false);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+void display_show_p2p_paired() {
+    gfx->fillScreen(C_BG);
+    draw_status_bar();
+
+    const int16_t cy = (MSG_Y0 + MSG_Y1) / 2 - 50;
+    gfx->fillRoundRect(20, cy, W - 40, 120, 16, C_HDR);
+    gfx->drawRoundRect(20, cy, W - 40, 120, 16, C_ACCENT);
+    gfx->drawRoundRect(22, cy + 2, W - 44, 116, 14, C_ACCENT2);
+
+    // Bold checkmark
+    const int tx = W / 2, ty = cy + 40;
+    for (int t = -2; t <= 2; t++) {
+        gfx->drawLine(tx - 20 + t, ty,      tx - 4 + t, ty + 16,  C_OK);
+        gfx->drawLine(tx - 4 + t, ty + 16,  tx + 22 + t, ty - 14, C_OK);
+    }
+
+    tcenter("PAIRED!", cy + 66, C_ACCENT2, C_HDR);
+    dflt(); gfx->setTextSize(1);
+    tcenter("Starting secure chat...", cy + 88, C_DIM, C_HDR, false);
+}
+
+// ── GluStic Fun: raw draw helpers for the tile map renderer ──────────────────
+#ifdef GLUSTIC_FUN
+void display_draw_pixels(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *pixels) {
+    gfx->draw16bitRGBBitmap(x, y, pixels, w, h);
+}
+void display_fill_rect(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t color) {
+    gfx->fillRect(x, y, w, h, color);
+}
+void display_fill_circle(int16_t x, int16_t y, uint8_t r, uint16_t color) {
+    gfx->fillCircle(x, y, r, color);
+}
+#endif // GLUSTIC_FUN
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Heltec V3 — SSD1306 128×64 OLED via U8g2
-// ═════════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
 #else
 
 #include <U8g2lib.h>
@@ -422,11 +845,9 @@ void display_show_idle(const char *kid_name, int rssi, int battery_pct, uint8_t 
     u8g2.drawStr(90, 58, bat_buf);
 
     if (pending > 0) {
-        char pend_buf[8];
-        snprintf(pend_buf, sizeof(pend_buf), "!%u", pending);
+        char pend_buf[8]; snprintf(pend_buf, sizeof(pend_buf), "!%u", pending);
         u8g2.drawStr(0, 40, pend_buf);
     }
-
     u8g2.sendBuffer();
 }
 
@@ -436,35 +857,40 @@ void display_show_message(const char *from, const char *body) {
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawStr(0, 22, from);
     u8g2.setFont(u8g2_font_5x7_tf);
-    char line[22];
-    int  body_len = strlen(body);
-    int  y = 34;
+    char line[22]; int body_len = strlen(body), y = 34;
     for (int i = 0; i < body_len && y <= 60; i += 21) {
-        strncpy(line, body + i, 21);
-        line[21] = '\0';
-        u8g2.drawStr(0, y, line);
-        y += 10;
+        strncpy(line, body + i, 21); line[21] = '\0';
+        u8g2.drawStr(0, y, line); y += 10;
     }
     u8g2.sendBuffer();
 }
 
-// No-op on Heltec — no keyboard to compose with
+void display_push_message(const char * /*from*/, const char *body, bool /*outgoing*/) {
+    display_show_message("", body);
+}
+
+void display_scroll(int /*delta*/) {}
+void display_touch(int16_t /*x*/, int16_t /*y*/) {}
+void display_refresh_status() {}
+
 void display_show_compose(const char * /*draft*/) {}
 
+void display_show_i2c_scan(uint32_t /*hold_ms*/) {}
+void display_show_p2p_mode_select() {}
+void display_show_p2p_host(const char * /*code*/) {}
+void display_show_p2p_join(const char * /*typed*/, int /*len*/) {}
+void display_show_p2p_paired() {}
+
 void display_show_sending(uint8_t pending) {
-    u8g2.clearBuffer();
-    header_bar("SENDING");
+    u8g2.clearBuffer(); header_bar("SENDING");
     u8g2.setFont(u8g2_font_5x7_tf);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%u message(s) queued", pending);
-    u8g2.drawStr(0, 28, buf);
-    u8g2.drawStr(0, 40, "Transmitting...");
+    char buf[32]; snprintf(buf, sizeof(buf), "%u message(s) queued", pending);
+    u8g2.drawStr(0, 28, buf); u8g2.drawStr(0, 40, "Transmitting...");
     u8g2.sendBuffer();
 }
 
 void display_show_wifi_sync() {
-    u8g2.clearBuffer();
-    header_bar("WIFI SYNC");
+    u8g2.clearBuffer(); header_bar("WIFI SYNC");
     u8g2.setFont(u8g2_font_5x7_tf);
     u8g2.drawStr(0, 28, "WiFi connected.");
     u8g2.drawStr(0, 40, "Syncing messages...");
@@ -472,24 +898,17 @@ void display_show_wifi_sync() {
 }
 
 void display_show_error(const char *msg) {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_5x7_tf);
-    u8g2.drawStr(0, 10, "ERROR");
-    u8g2.drawHLine(0, 12, DISPLAY_WIDTH);
-    int len = strlen(msg), y = 24;
-    char line[22];
+    u8g2.clearBuffer(); u8g2.setFont(u8g2_font_5x7_tf);
+    u8g2.drawStr(0, 10, "ERROR"); u8g2.drawHLine(0, 12, DISPLAY_WIDTH);
+    int len = strlen(msg), y = 24; char line[22];
     for (int i = 0; i < len && y <= 60; i += 21) {
-        strncpy(line, msg + i, 21);
-        line[21] = '\0';
-        u8g2.drawStr(0, y, line);
-        y += 10;
+        strncpy(line, msg + i, 21); line[21] = '\0';
+        u8g2.drawStr(0, y, line); y += 10;
     }
     u8g2.sendBuffer();
 }
 
-void display_set_lora_rssi(int rssi) {
-    s_rssi = rssi;
-}
+void display_set_lora_rssi(int rssi) { s_rssi = rssi; }
 
 void display_show_provisioning_qr(
     const char *dev_eui, const char *app_eui, const char *app_key,
@@ -497,39 +916,23 @@ void display_show_provisioning_qr(
 ) {
     char qr_data[72];
     snprintf(qr_data, sizeof(qr_data), "GSF:%s:%s:%s", dev_eui, app_eui, app_key);
-
-    QRCode qrcode;
-    uint8_t qrcode_buf[qrcode_getBufferSize(3)];
+    QRCode qrcode; uint8_t qrcode_buf[qrcode_getBufferSize(3)];
     qrcode_initText(&qrcode, qrcode_buf, 3, ECC_LOW, qr_data);
-
     u8g2.clearBuffer();
-
-    u8g2.setDrawColor(1);
-    u8g2.drawBox(0, 0, 64, 64);
-    u8g2.setDrawColor(0);
+    u8g2.setDrawColor(1); u8g2.drawBox(0, 0, 64, 64); u8g2.setDrawColor(0);
     const int x_off = 3, y_off = 3;
-    for (uint8_t y = 0; y < qrcode.size; y++) {
-        for (uint8_t x = 0; x < qrcode.size; x++) {
-            if (qrcode_getModule(&qrcode, x, y)) {
-                u8g2.drawBox(x_off + x * 2, y_off + y * 2, 2, 2);
-            }
-        }
-    }
-
+    for (uint8_t y = 0; y < qrcode.size; y++)
+        for (uint8_t x = 0; x < qrcode.size; x++)
+            if (qrcode_getModule(&qrcode, x, y))
+                u8g2.drawBox(x_off + x*2, y_off + y*2, 2, 2);
     u8g2.setDrawColor(1);
-    u8g2.setFont(u8g2_font_4x6_tf);
-    u8g2.drawStr(66, 10, "SCAN QR");
+    u8g2.setFont(u8g2_font_4x6_tf); u8g2.drawStr(66, 10, "SCAN QR");
     u8g2.drawStr(66, 22, "BLE:");
     const char *suffix = strrchr(ble_name, '-');
-    u8g2.setFont(u8g2_font_5x7_tf);
-    u8g2.drawStr(66, 32, suffix ? suffix + 1 : ble_name);
-    u8g2.setFont(u8g2_font_4x6_tf);
-    u8g2.drawStr(66, 46, "PIN:");
-    char pin_buf[8];
-    snprintf(pin_buf, sizeof(pin_buf), "%06lu", (unsigned long)pin_code);
-    u8g2.setFont(u8g2_font_5x7_tf);
-    u8g2.drawStr(66, 56, pin_buf);
-
+    u8g2.setFont(u8g2_font_5x7_tf); u8g2.drawStr(66, 32, suffix ? suffix+1 : ble_name);
+    u8g2.setFont(u8g2_font_4x6_tf); u8g2.drawStr(66, 46, "PIN:");
+    char pin_buf[8]; snprintf(pin_buf, sizeof(pin_buf), "%06lu", (unsigned long)pin_code);
+    u8g2.setFont(u8g2_font_5x7_tf); u8g2.drawStr(66, 56, pin_buf);
     u8g2.sendBuffer();
 }
 

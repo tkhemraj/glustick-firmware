@@ -4,28 +4,25 @@
 #include <Wire.h>
 
 void keyboard_init() {
-    // T-Deck keyboard sits on a dedicated I²C bus (Wire1)
-    Wire1.begin(KB_SDA, KB_SCL);
-    Wire1.setClock(100000);
-
-    // Pull INT pin to detect key-available signal
+    Wire.begin(KB_SDA, KB_SCL);
+    Wire.setClock(100000);
     pinMode(KB_INT, INPUT_PULLUP);
+    // LILYGO keyboard MCU (ESP32-C3) needs 500 ms after power-on to be ready
+    delay(500);
+    // Set keyboard backlight to full brightness
+    Wire.beginTransmission(KB_ADDR);
+    Wire.write(0x01);   // BRIGHTNESS_CMD
+    Wire.write(255);
+    Wire.endTransmission();
 }
 
 char keyboard_read() {
-    // INT is active-LOW when a key is waiting
-    if (digitalRead(KB_INT) == HIGH) return 0;
-
-    Wire1.requestFrom((uint8_t)KB_ADDR, (uint8_t)1);
-    if (!Wire1.available()) return 0;
-
-    uint8_t raw = Wire1.read();
+    // Poll unconditionally — the INT check was masking keys when the
+    // pin was floating or the MCU hadn't asserted it yet.
+    Wire.requestFrom((uint8_t)KB_ADDR, (uint8_t)1);
+    if (!Wire.available()) return 0;
+    uint8_t raw = Wire.read();
     if (raw == 0) return 0;
-
-    // Map the T-Deck keyboard's special codes to standard ASCII:
-    //   0x08 = backspace (already standard)
-    //   0x0D = enter     (already standard)
-    //   0x20+ = printable ASCII passthrough
     return (char)raw;
 }
 
