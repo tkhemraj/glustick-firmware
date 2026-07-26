@@ -1,5 +1,5 @@
 #pragma once
-#ifdef GLUSTIC_FUN
+#if defined(GLUSTIC_FUN) || defined(TRANSPORT_MESHTASTIC)
 
 #include <Arduino.h>
 
@@ -19,4 +19,4 @@ void     gps_loop();
 // Returns the latest fix.  valid=false until the first fix is acquired.
 GpsCoord gps_get();
 
-#endif // GLUSTIC_FUN
+#endif // GLUSTIC_FUN || TRANSPORT_MESHTASTIC

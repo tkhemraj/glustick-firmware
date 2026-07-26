@@ -20,8 +20,10 @@
 #  include "trackball.h"
 #  include "touch.h"
 #endif
-#ifdef GLUSTIC_FUN
+#if defined(GLUSTIC_FUN) || defined(TRANSPORT_MESHTASTIC)
 #  include "gps.h"
+#endif
+#ifdef GLUSTIC_FUN
 #  include "map_tiles.h"
 #endif
 
@@ -47,10 +49,12 @@ static uint16_t g_compose_len              = 0;
 static bool     g_compose_dirty            = false;
 #endif
 
+#if defined(GLUSTIC_FUN) || defined(TRANSPORT_MESHTASTIC)
+static GpsCoord  g_own_pos  = {};
+#endif
 #ifdef GLUSTIC_FUN
-static GpsCoord  g_own_pos  = {};   // our last GPS fix
-static GpsCoord  g_peer_pos = {};   // peer's last known position (from LoRa packets)
-static bool      g_map_view = false; // false = chat, true = map
+static GpsCoord  g_peer_pos = {};
+static bool      g_map_view = false;
 #endif
 
 // ── Battery reading ───────────────────────────────────────────────────────────
@@ -237,6 +241,7 @@ void setup() {
         }
     }
 
+    gps_init();
     lora_init("", "", "", on_lora_downlink);
     enter_state(STATE_LORA_CONNECTED);
 #else
@@ -346,10 +351,9 @@ void loop() {
         }
     }
 
-#ifdef GLUSTIC_FUN
+#if defined(GLUSTIC_FUN) || defined(TRANSPORT_MESHTASTIC)
     gps_loop();
     g_own_pos = gps_get();
-#ifdef TRANSPORT_MESHTASTIC
     if (g_own_pos.valid) {
         static unsigned long last_pos_ms = 0;
         if (millis() - last_pos_ms >= 60000) {
@@ -358,9 +362,10 @@ void loop() {
         }
     }
 #endif
+#ifdef GLUSTIC_FUN
     if (g_map_view) {
         static unsigned long last_map_ms = 0;
-        if (millis() - last_map_ms >= 2000) {  // redraw every 2s
+        if (millis() - last_map_ms >= 2000) {
             map_tiles_draw(g_own_pos, g_peer_pos);
             last_map_ms = millis();
         }

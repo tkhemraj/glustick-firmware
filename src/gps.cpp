@@ -1,4 +1,4 @@
-#ifdef GLUSTIC_FUN
+#if defined(GLUSTIC_FUN) || defined(TRANSPORT_MESHTASTIC)
 
 #include "gps.h"
 #include <TinyGPS++.h>
@@ -8,9 +8,11 @@ static TinyGPSPlus   s_gps;
 static HardwareSerial s_serial(1);  // UART1 — remapped to GPS_RX_PIN / GPS_TX_PIN
 
 void gps_init() {
-    // UART0 (Serial) defaults to the same GPIO 43/44 as the L76K GPS on T-Deck Plus.
-    // Disabling it frees those pins so UART1 can take them.
+#ifndef TRANSPORT_MESHTASTIC
+    // GLUSTIC_FUN: Serial = UART0 on GPIO 43/44 — end it to free the pins.
+    // remotest uses USB CDC (Serial = HWCDC), so UART0 doesn't own those pins.
     Serial.end();
+#endif
     s_serial.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
 }
 
@@ -30,4 +32,4 @@ GpsCoord gps_get() {
     };
 }
 
-#endif // GLUSTIC_FUN
+#endif // GLUSTIC_FUN || TRANSPORT_MESHTASTIC
