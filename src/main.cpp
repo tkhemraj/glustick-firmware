@@ -70,7 +70,7 @@ static int read_battery_pct() {
 static void on_lora_downlink(const char *body) {
     queue_push_inbound(queue_next_msg_id(), body);
 #ifdef TRANSPORT_MESHTASTIC
-    display_push_message("Mesh [L]", body, false);
+    display_push_message("Radio", body, false);
 #else
     display_push_message("Remote", body, false);
 #endif
@@ -79,7 +79,7 @@ static void on_lora_downlink(const char *body) {
 #ifdef TRANSPORT_MESHTASTIC
 static void on_wifi_downlink(const char *body) {
     queue_push_inbound(queue_next_msg_id(), body);
-    display_push_message("Mesh [W]", body, false);
+    display_push_message("WiFi", body, false);
 }
 #endif
 
@@ -405,12 +405,13 @@ void loop() {
                         display_refresh_status();
                     }
 #elif defined(TRANSPORT_MESHTASTIC)
-                    // Meshtastic: direct fire-and-forget over LoRa + MQTT.
-                    // lora_send() internally calls wifi_mesh_send() when MQTT is up.
                     {
                         static uint16_t s_mesh_seq = 1;
+                        bool mqtt_ok = wifi_mesh_mqtt_up();
                         display_show_sending(0);
-                        lora_send(g_compose, s_mesh_seq++);
+                        bool lora_ok = lora_send(g_compose, s_mesh_seq++);
+                        display_show_sent_path(lora_ok, mqtt_ok);
+                        delay(700);
                         display_refresh_status();
                     }
 #else

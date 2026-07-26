@@ -52,6 +52,9 @@ void display_show_wifi_setup(const char *ssid, const char *pass,
 // Update WiFi / MQTT indicators in the status bar.
 // Call after connection state changes, then call display_refresh_status().
 void display_set_wifi_status(int wifi_rssi, bool mqtt_connected);
+// Show which paths carried an outgoing message.
+// Call after lora_send(), then delay(600), then display_refresh_status().
+void display_show_sent_path(bool via_lora, bool via_wifi);
 
 // P2P pairing screens (T-Deck only; no-ops on Heltec V3).
 void display_show_p2p_mode_select();

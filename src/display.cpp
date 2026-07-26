@@ -179,6 +179,8 @@ static int16_t bubble_h(const char *text, int16_t text_max_w) {
 static void draw_status_bar() {
     gfx->fillRect(0, 0, W, STAT_H, C_HDR);
     gfx->drawFastHLine(0, STAT_H - 1, W, C_ACCENT);
+    const int cy = STAT_H / 2;
+    const int ty = (STAT_H - 8) / 2;  // y for 8px-tall default font
 
     // Device name (left)
     sans();
@@ -186,54 +188,53 @@ static void draw_status_bar() {
     gfx->setCursor(10, STAT_H - 7);
     gfx->print(s_dev_name);
 
-    // Battery percentage label (right-aligned, ends at bx-3)
     dflt(); gfx->setTextSize(1);
+
+    // ── right side, working left from screen edge ─────────────────────────────
+
+    // LoRa signal bars — 4 bars, ends at W-8
+    bool lora_linked = (s_rssi_val != 0);
+    int lora_bars = !lora_linked ? 0 :
+                    s_rssi_val >= -60 ? 4 : s_rssi_val >= -70 ? 3 :
+                    s_rssi_val >= -80 ? 2 : 1;
+    static const int8_t BH[4] = { 4, 6, 8, 10 };
+    for (int i = 0; i < 4; i++) {
+        int bbx = (W - 34) + i * 7;
+        int bby = STAT_H - 3 - BH[i];
+        gfx->fillRect(bbx, bby, 5, BH[i], i < lora_bars ? C_OK : C_DIM);
+    }
+
+    // "LR" label just left of LoRa bars — green when a peer has been heard
+    uint16_t lr_col = lora_linked ? C_OK : C_DIM;
+    gfx->setTextColor(lr_col, C_HDR);
+    gfx->setCursor(W - 50, ty);
+    gfx->print("LR");
+
+    // WiFi/MQTT dot — left of "LR"
+    uint16_t wf_col = s_mqtt_conn ? C_OK : C_DIM;
+    gfx->fillCircle(W - 60, cy, 4, C_HDR);   // erase
+    gfx->fillCircle(W - 60, cy, 3, wf_col);
+
+    // "WF" label just left of MQTT dot — green when broker connected
+    gfx->setTextColor(wf_col, C_HDR);
+    gfx->setCursor(W - 78, ty);
+    gfx->print("WF");
+
+    // Battery icon — 22×10 px at x=W-106, with 2px tip
     char bat_pct_str[5];
     snprintf(bat_pct_str, sizeof(bat_pct_str), "%d%%", s_bat_val);
     uint16_t bat_col = s_bat_val > 25 ? C_OK : (s_bat_val > 10 ? C_WARN : C_ERR);
-    // each char is 6px wide in default font; right-align against x=W-95
-    int pct_chars = (int)strlen(bat_pct_str);
-    gfx->setTextColor(bat_col, C_HDR);
-    gfx->setCursor(W - 95 - pct_chars * 6, (STAT_H - 8) / 2);
-    gfx->print(bat_pct_str);
-
-    // Battery icon — 22×10 px at x=W-90
-    const int bx = W - 90, by = (STAT_H - 10) / 2;
+    const int bx = W - 106, by = (STAT_H - 10) / 2;
     gfx->drawRect(bx, by, 22, 10, C_DIM);
     int bfill = (s_bat_val * 20) / 100;
     if (bfill > 0) gfx->fillRect(bx + 1, by + 1, bfill, 8, bat_col);
     gfx->fillRect(bx + 22, by + 3, 2, 4, C_DIM);
 
-    // MQTT dot — cx=W-57, radius 3
-    const int mcy = STAT_H / 2;
-    uint16_t mqtt_col = s_mqtt_conn ? C_OK : C_DIM;
-    gfx->fillCircle(W - 57, mcy, 4, C_HDR);         // erase first
-    gfx->fillCircle(W - 57, mcy, 3, mqtt_col);
-
-    // WiFi bars — 3 bars, 4 px wide, rising heights, x = W-48
-    static const int8_t WH[3] = { 4, 7, 10 };
-    int wifi_bars = 0;
-    if (s_wifi_rssi < 0) {
-        wifi_bars = s_wifi_rssi >= -55 ? 3 : s_wifi_rssi >= -70 ? 2 : 1;
-    }
-    for (int i = 0; i < 3; i++) {
-        int wbx = (W - 48) + i * 6;
-        int wby = STAT_H - 3 - WH[i];
-        uint16_t wc = (i < wifi_bars) ? C_ACCENT2 : C_DIM;
-        gfx->fillRect(wbx, wby, 4, WH[i], wc);
-    }
-
-    // LoRa signal bars — 4 bars of increasing height, x = W-30 (unchanged)
-    bool linked = (s_rssi_val != 0);
-    int bars = !linked ? 0 :
-               s_rssi_val >= -60 ? 4 : s_rssi_val >= -70 ? 3 :
-               s_rssi_val >= -80 ? 2 : 1;
-    static const int8_t BH[4] = { 4, 6, 8, 10 };
-    for (int i = 0; i < 4; i++) {
-        int bbx = (W - 30) + i * 7;
-        int bby = STAT_H - 3 - BH[i];
-        gfx->fillRect(bbx, bby, 5, BH[i], i < bars ? C_OK : C_DIM);
-    }
+    // Battery % — right-aligned, ends 3px left of battery icon
+    int pct_chars = (int)strlen(bat_pct_str);
+    gfx->setTextColor(bat_col, C_HDR);
+    gfx->setCursor(bx - 3 - pct_chars * 6, ty);
+    gfx->print(bat_pct_str);
 }
 
 // ── Compose bar (bottom 28 px) ───────────────────────────────────────────────
@@ -417,6 +418,27 @@ void display_show_sending(uint8_t /*pending*/) {
     gfx->drawFastHLine(0, STAT_H - 1, W, C_ACCENT);
     sans(); gfx->setTextColor(C_WARN, C_HDR);
     gfx->setCursor(10, STAT_H - 7); gfx->print("Sending...");
+}
+
+// Shows which paths carried the outgoing message — call after lora_send(),
+// then delay briefly, then display_refresh_status() to restore normal bar.
+void display_show_sent_path(bool via_lora, bool via_wifi) {
+    gfx->fillRect(0, 0, W, STAT_H, C_HDR);
+    gfx->drawFastHLine(0, STAT_H - 1, W, C_ACCENT);
+    sans();
+    if (via_lora && via_wifi) {
+        gfx->setTextColor(C_OK, C_HDR);
+        gfx->setCursor(10, STAT_H - 7); gfx->print("Sent  Radio + WiFi");
+    } else if (via_lora) {
+        gfx->setTextColor(C_OK, C_HDR);
+        gfx->setCursor(10, STAT_H - 7); gfx->print("Sent  Radio only");
+    } else if (via_wifi) {
+        gfx->setTextColor(C_WARN, C_HDR);
+        gfx->setCursor(10, STAT_H - 7); gfx->print("Sent  WiFi only");
+    } else {
+        gfx->setTextColor(C_ERR, C_HDR);
+        gfx->setCursor(10, STAT_H - 7); gfx->print("Send failed");
+    }
 }
 
 void display_show_joining() {
