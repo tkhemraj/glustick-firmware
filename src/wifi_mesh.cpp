@@ -2,6 +2,7 @@
 
 #include "wifi_mesh.h"
 #include "mesh_config.h"
+#include "wifi_store.h"
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Preferences.h>
@@ -323,6 +324,8 @@ void wifi_mesh_init(uint32_t node_id, const uint8_t psk[16],
     s_mqtt.setServer(MQTT_HOST, MQTT_PORT);
     s_mqtt.setCallback(on_mqtt_message);
     s_mqtt.setBufferSize(512);
+
+    wifi_store_begin();  // load the remembered-networks table from NVS
 }
 
 bool wifi_mesh_load_creds(char *ssid_out, char *pass_out,
@@ -355,24 +358,59 @@ static char          s_init_pass[64] = {};
 
 // Permanent wifi+MQTT task — lives for the device lifetime.
 // All TCP/MQTT stack frames stay here (20KB), never on loopTask (8KB).
-static void wifi_mesh_task_fn(void * /*arg*/) {
-    Serial.printf("[wifi] task: connecting to '%s'\n", s_init_ssid);
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(s_init_ssid, s_init_pass);
-
+static bool try_connect(const char *ssid, const char *pass, uint32_t timeout_ms) {
+    if (!ssid || !ssid[0]) return false;
+    Serial.printf("[wifi] trying '%s'\n", ssid);
+    WiFi.begin(ssid, pass);
     unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < 20000) {
-        delay(200);
+    while (WiFi.status() != WL_CONNECTED && millis() - start < timeout_ms) delay(200);
+    return WiFi.status() == WL_CONNECTED;
+}
+
+static void wifi_mesh_task_fn(void * /*arg*/) {
+    WiFi.mode(WIFI_STA);
+
+    char connected_ssid[WIFI_SSID_LEN] = {};
+    char connected_pass[WIFI_PASS_LEN] = {};
+    bool connected = false;
+
+    // 1) The creds passed to begin() (provisioned / baked) win first.
+    if (s_init_ssid[0] && try_connect(s_init_ssid, s_init_pass, 20000)) {
+        connected = true;
+        strncpy(connected_ssid, s_init_ssid, WIFI_SSID_LEN - 1);
+        strncpy(connected_pass, s_init_pass, WIFI_PASS_LEN - 1);
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.printf("[wifi] task: up, rssi=%d\n", (int)WiFi.RSSI());
+    // 2) Otherwise fall back to every remembered network, most-recent first,
+    //    but only ones actually in range (scan once, then try in order).
+    if (!connected && wifi_store_count() > 0) {
+        int found = WiFi.scanNetworks();
+        int order[WIFI_STORE_MAX];
+        int m = wifi_store_by_recency(order, WIFI_STORE_MAX);
+        for (int oi = 0; oi < m && !connected; oi++) {
+            const char *ss = wifi_store_ssid(order[oi]);
+            bool visible = false;
+            for (int s = 0; s < found; s++)
+                if (WiFi.SSID(s) == ss) { visible = true; break; }
+            if (!visible) continue;
+            if (try_connect(ss, wifi_store_pass(order[oi]), 15000)) {
+                connected = true;
+                strncpy(connected_ssid, ss, WIFI_SSID_LEN - 1);
+                strncpy(connected_pass, wifi_store_pass(order[oi]), WIFI_PASS_LEN - 1);
+            }
+        }
+        WiFi.scanDelete();
+    }
+
+    if (connected) {
+        Serial.printf("[wifi] task: up on '%s', rssi=%d\n", connected_ssid, (int)WiFi.RSSI());
+        wifi_store_remember(connected_ssid, connected_pass);  // never forgotten unless deleted
         delay(500);  // let DHCP / DNS settle
         mqtt_connect_once();
         Serial.printf("[mqtt] task: connected=%d state=%d\n",
                       (int)s_mqtt.connected(), s_mqtt.state());
     } else {
-        Serial.println("[wifi] task: connect FAILED");
+        Serial.println("[wifi] task: connect FAILED (no known network in range)");
     }
 
     s_last_reconnect = millis();
@@ -421,12 +459,61 @@ void wifi_mesh_begin(const char *ssid, const char *pass) {
 
 bool wifi_mesh_ready() { return s_init_done; }
 
+// ── Serial Wi-Fi manager (delete workflow) ───────────────────────────────────
+// Type over the USB serial monitor (115200):
+//   wifi            list remembered networks (most-recent first)
+//   wifi del <n>    forget network #n from the list
+//   wifi forget <ssid>  forget by name
+static void wifi_print_list() {
+    int order[WIFI_STORE_MAX];
+    int m = wifi_store_by_recency(order, WIFI_STORE_MAX);
+    Serial.printf("[wifi] %d remembered network(s), most-recent first:\n", m);
+    for (int i = 0; i < m; i++)
+        Serial.printf("  %d) %s\n", i, wifi_store_ssid(order[i]));
+    if (m == 0) Serial.println("  (none)");
+}
+
+static void wifi_cmd_poll() {
+    static char line[96];
+    static uint8_t n = 0;
+    while (Serial.available()) {
+        char c = (char)Serial.read();
+        if (c == '\r') continue;
+        if (c != '\n' && n < sizeof(line) - 1) { line[n++] = c; continue; }
+        line[n] = '\0'; n = 0;
+        if (strncmp(line, "wifi", 4) != 0) continue;
+
+        const char *arg = line + 4;
+        while (*arg == ' ') arg++;
+        if (*arg == '\0' || strcmp(arg, "list") == 0) {
+            wifi_print_list();
+        } else if (strncmp(arg, "del ", 4) == 0) {
+            int order[WIFI_STORE_MAX];
+            int m = wifi_store_by_recency(order, WIFI_STORE_MAX);
+            int sel = atoi(arg + 4);
+            if (sel >= 0 && sel < m) {
+                char ss[WIFI_SSID_LEN]; strncpy(ss, wifi_store_ssid(order[sel]), WIFI_SSID_LEN - 1);
+                ss[WIFI_SSID_LEN - 1] = '\0';
+                wifi_store_delete(ss);
+                Serial.printf("[wifi] forgot '%s'\n", ss);
+            } else Serial.println("[wifi] bad index — try 'wifi' to list");
+        } else if (strncmp(arg, "forget ", 7) == 0) {
+            const char *ss = arg + 7;
+            Serial.printf(wifi_store_delete(ss) ? "[wifi] forgot '%s'\n"
+                                                : "[wifi] not found: '%s'\n", ss);
+        } else {
+            Serial.println("[wifi] usage: wifi | wifi del <n> | wifi forget <ssid>");
+        }
+    }
+}
+
 void wifi_mesh_loop() {
     // Drain the receive queue — safe to call display functions here (loopTask / core 1)
     while (s_rx_tail != s_rx_head) {
         if (s_rx_cb) s_rx_cb(s_rx_queue[s_rx_tail]);
         s_rx_tail = (s_rx_tail + 1) % RX_QUEUE_SIZE;
     }
+    wifi_cmd_poll();
 }
 
 void wifi_mesh_send(uint32_t to, uint32_t from, uint32_t pkt_id,

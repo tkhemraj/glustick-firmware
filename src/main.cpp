@@ -185,8 +185,15 @@ void setup() {
     }
     p2p_pair_load_key(g_app_key);
     {
+#ifdef DEVICE_NAME
+        // Name set at flash time: pio run -e elysian_voice (with
+        // -D DEVICE_NAME='"Zoe"' in build_flags or PLATFORMIO_BUILD_FLAGS).
+        strncpy(g_kid_name, DEVICE_NAME, sizeof(g_kid_name) - 1);
+        g_kid_name[sizeof(g_kid_name) - 1] = '\0';
+#else
         uint64_t m = ESP.getEfuseMac();
         snprintf(g_kid_name, sizeof(g_kid_name), "Dev-%04X", (uint16_t)(m & 0xFFFF));
+#endif
     }
     lora_init(g_dev_eui, g_app_eui, g_app_key, on_lora_downlink);
 #ifdef FEATURE_VOICE

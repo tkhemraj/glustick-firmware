@@ -84,6 +84,30 @@ pio run -e elysian_voice -t upload   # flash two boards
 pio device monitor                    # 115200 baud
 ```
 
+### Name a device at flash time
+
+Give each board a human name instead of the auto `Dev-A1B2`. It shows on-screen
+and labels the messages it sends:
+
+```bash
+PLATFORMIO_BUILD_FLAGS='-D DEVICE_NAME=\"Zoe\"' pio run -e elysian_voice -t upload
+```
+
+(or add `-D DEVICE_NAME='"Zoe"'` to the env's `build_flags` in `platformio.ini`.)
+
+### Wi-Fi memory (Meshtastic/`remotest` build)
+
+The device **remembers every Wi-Fi it has ever joined** (up to 8) and, on boot,
+reconnects to the most-recently-used network that's actually in range — then falls
+back through the rest by recency. A network is **never forgotten unless you delete
+it.** Manage the list over the USB serial monitor:
+
+```
+wifi                 # list remembered networks, most-recent first
+wifi del 2           # forget network #2 from the list
+wifi forget HomeAP   # forget by name
+```
+
 ---
 
 ## 🎙️ Voice over LoRa
