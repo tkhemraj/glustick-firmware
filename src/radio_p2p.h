@@ -4,8 +4,13 @@
 #include <Arduino.h>
 #include "config.h"
 
-// Callback invoked when an inbound message arrives from a peer.
+// Callback invoked when an inbound text message arrives from a peer.
 typedef void (*LoRaDownlinkCb)(const char *body);
+
+// Callback invoked when an inbound VOICE frame-group arrives from a peer.
+// `data` is raw Codec2 bytes (not null-terminated); `len` is its length.
+// A len of 0 is an end-of-talk marker (PTT released).
+typedef void (*LoRaVoiceCb)(const uint8_t *data, uint8_t len);
 
 // Initialise the SX1262 and begin listening.
 // dev_eui_hex / app_eui_hex are unused in P2P mode.
@@ -33,5 +38,20 @@ bool lora_is_joined();
 
 // RSSI of the last received packet (dBm), 0 if none yet.
 int lora_last_rssi();
+
+// Network id currently on the air (0 until a repeater has heard one).
+uint32_t lora_net_id();
+
+// How many packets this radio has rebroadcast. Endpoints stay at 0.
+uint32_t lora_repeat_count();
+
+#ifdef FEATURE_VOICE
+// Register the handler for inbound voice frame-groups.
+void lora_set_voice_cb(LoRaVoiceCb cb);
+
+// Broadcast a raw voice frame-group (Codec2 bytes) to peers on our net id.
+// len may be 0 to signal end-of-talk. Returns false if a TX is in progress.
+bool lora_send_raw(const uint8_t *data, uint8_t len);
+#endif
 
 #endif // TRANSPORT_P2P

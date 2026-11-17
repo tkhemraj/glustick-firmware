@@ -61,3 +61,7 @@ void display_show_p2p_mode_select();
 void display_show_p2p_host(const char *code);             // code = 6-char uppercase hex
 void display_show_p2p_join(const char *typed, int len);   // typed = chars entered so far
 void display_show_p2p_paired();
+
+// Heltec repeater. listening is true until the first family packet is heard.
+void display_show_repeater(bool listening, uint32_t net_id, int rssi,
+                           uint32_t repeats, int battery_pct);

@@ -903,6 +903,30 @@ void display_show_p2p_host(const char * /*code*/) {}
 void display_show_p2p_join(const char * /*typed*/, int /*len*/) {}
 void display_show_p2p_paired() {}
 
+void display_show_repeater(bool listening, uint32_t net_id, int rssi,
+                           uint32_t repeats, int battery_pct) {
+    u8g2.clearBuffer();
+    header_bar("REPEATER");
+    u8g2.setFont(u8g2_font_6x10_tf);
+    if (listening || net_id == 0) {
+        u8g2.drawStr(0, 24, "Listening");
+        u8g2.setFont(u8g2_font_5x7_tf);
+        u8g2.drawStr(0, 38, "Hold PRG to forget");
+    } else {
+        char line[22];
+        snprintf(line, sizeof(line), "net %08lX", (unsigned long)net_id);
+        u8g2.drawStr(0, 24, line);
+        u8g2.setFont(u8g2_font_5x7_tf);
+        snprintf(line, sizeof(line), "fwd %lu  %ddBm",
+                 (unsigned long)repeats, rssi);
+        u8g2.drawStr(0, 38, line);
+        snprintf(line, sizeof(line), "bat %d%%", battery_pct);
+        u8g2.drawStr(0, 50, line);
+        u8g2.drawStr(0, 62, "Hold PRG to forget");
+    }
+    u8g2.sendBuffer();
+}
+
 void display_show_sending(uint8_t pending) {
     u8g2.clearBuffer(); header_bar("SENDING");
     u8g2.setFont(u8g2_font_5x7_tf);

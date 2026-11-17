@@ -5,6 +5,9 @@
 #if defined(TRANSPORT_P2P)
 #  include "radio_p2p.h"
 #  include "p2p_pair.h"
+#  ifdef FEATURE_VOICE
+#    include "voice.h"
+#  endif
 #elif defined(TRANSPORT_MESHTASTIC)
 #  include "radio_meshtastic.h"
 #  include "wifi_mesh.h"
@@ -186,6 +189,9 @@ void setup() {
         snprintf(g_kid_name, sizeof(g_kid_name), "Dev-%04X", (uint16_t)(m & 0xFFFF));
     }
     lora_init(g_dev_eui, g_app_eui, g_app_key, on_lora_downlink);
+#ifdef FEATURE_VOICE
+    if (!voice_init()) display_show_error("Voice init failed");
+#endif
     enter_state(STATE_LORA_CONNECTED);
 #elif defined(TRANSPORT_MESHTASTIC)
     // Meshtastic: private channel with community relay + optional WiFi/MQTT bridge.
@@ -290,6 +296,10 @@ void loop() {
 
     lora_loop();
 
+#ifdef FEATURE_VOICE
+    voice_loop();
+#endif
+
 #ifdef TRANSPORT_MESHTASTIC
     // WiFi+MQTT tick — reconnects automatically if disconnected
     wifi_mesh_loop();
@@ -354,6 +364,9 @@ void loop() {
 #if defined(GLUSTIC_FUN) || defined(TRANSPORT_MESHTASTIC)
     gps_loop();
     g_own_pos = gps_get();
+#  ifdef TRANSPORT_MESHTASTIC
+    // Position publish goes to the Meshtastic MQTT bridge; GLUSTIC_FUN (P2P)
+    // has no wifi_mesh, it only uses g_own_pos for the local SD map.
     if (g_own_pos.valid) {
         static unsigned long last_pos_ms = 0;
         if (millis() - last_pos_ms >= 60000) {
@@ -361,6 +374,7 @@ void loop() {
             wifi_mesh_publish_position(g_own_pos.lat, g_own_pos.lon);
         }
     }
+#  endif
 #endif
 #ifdef GLUSTIC_FUN
     if (g_map_view) {

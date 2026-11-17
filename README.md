@@ -2,8 +2,8 @@
 
 # Glustick Link — Firmware
 
-**Messaging that works when the internet doesn't.**<br>
-LoRaWAN + WiFi firmware for the [Heltec WiFi LoRa 32 V3](https://heltec.org/project/wifi-lora-32-v3/) · ESP32-S3 + SX1262 + SSD1306 OLED
+**Messaging — and now voice — that works when the internet doesn't.**<br>
+LoRa P2P + Meshtastic + WiFi firmware for the [LilyGo T-Deck](https://www.lilygo.cc/products/t-deck) · ESP32-S3 + SX1262 + 2.8″ ST7789 + BlackBerry keyboard + mic/speaker
 
 <br>
 
@@ -68,14 +68,24 @@ OTAA join to a LoRaWAN gateway. Uplinks route through ChirpStack → MQTT → Gl
 
 ## Hardware
 
+**Shipping hardware: [LilyGo T-Deck](https://www.lilygo.cc/products/t-deck)** (the BlackBerry-style unit). The `heltec_v3` envs are the old LoRaWAN dev board. `heltec_repeater` is the one to flash when the board is a Heltec WiFi LoRa 32 V3: that board has no keyboard, so it only repeats.
+
+```bash
+pio run -e heltec_repeater --target upload
+```
+
+It uses the same radio as `elysian` (915.0 MHz, SF10). The first family packet it hears becomes its net. Hold PRG while it boots to forget that net. Europe: `heltec_repeater_eu868` (868.0 MHz) — the T-Decks have to be built for that frequency too.
+
 | Component | Details |
 |---|---|
-| MCU | ESP32-S3 (`heltec_wifi_lora_32_V3`) |
-| Radio | SX1262 — LoRa 868 / 915 MHz |
-| Display | SSD1306 128×64 OLED (I²C, hardware reset GPIO 21) |
-| Connectivity | WiFi 2.4 GHz + BLE 5.0 + LoRaWAN |
-| Power | USB-C + LiPo header |
-| Battery ADC | GPIO 1 (voltage divider, 3.0–4.2 V → 0–100%) |
+| MCU | ESP32-S3 (`T-Deck`, 16 MB flash / 8 MB OPI PSRAM) |
+| Radio | SX1262 — LoRa 868 / 915 MHz (CS 9 · SCK 40 · MISO 38 · MOSI 41 · BUSY 13 · RST 17 · DIO1 45) |
+| Display | ST7789 320×240 IPS, backlight GPIO 42 |
+| Input | I²C BlackBerry keyboard (0x55, INT 46) + trackball (GPIO 1/2/3/15, click = GPIO 0) |
+| Audio | **Speaker** via I²S amp (WS 5 · BCK 7 · DOUT 6) · **Mic** ES7210 I²S ADC (MCLK 48 · SCK 47 · LRCK 21 · DIN 14) — enables voice over LoRa |
+| Connectivity | WiFi 2.4 GHz + BLE 5.0 + LoRa (P2P / Meshtastic / LoRaWAN) |
+| Power | USB-C + LiPo, peripheral power latch GPIO 10 |
+| Battery ADC | GPIO 4 (voltage divider, 3.0–4.2 V → 0–100%) |
 
 <details>
 <summary><strong>Pin mapping</strong></summary>
